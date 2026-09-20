@@ -1,0 +1,6 @@
+{
+  "name": "المنهج الرقمي للإدارة الحكومية",
+  "description": "نظام إدارة شؤون الموظفين والحضور والغياب للدوائر والمؤسسات الحكومية - تصميم المهندس حسين عبد المنذر",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
