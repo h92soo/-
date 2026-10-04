@@ -21,9 +21,13 @@ import { Employee } from '../types';
 
 interface IndexedDBTesterProps {
   compact?: boolean;
+  onEmployeeDataChanged?: () => void;
 }
 
-export const IndexedDBTester: React.FC<IndexedDBTesterProps> = ({ compact = false }) => {
+export const IndexedDBTester: React.FC<IndexedDBTesterProps> = ({
+  compact = false,
+  onEmployeeDataChanged,
+}) => {
   const [isRunning, setIsRunning] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
@@ -57,6 +61,9 @@ export const IndexedDBTester: React.FC<IndexedDBTesterProps> = ({ compact = fals
     setTestResult(result);
     setIsRunning(false);
     refreshCount();
+    if (onEmployeeDataChanged) {
+      onEmployeeDataChanged();
+    }
   };
 
   return (
@@ -104,12 +111,8 @@ export const IndexedDBTester: React.FC<IndexedDBTesterProps> = ({ compact = fals
         <div className="p-3.5 space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-slate-600 dark:text-slate-300 text-[11px] leading-relaxed">
-              انقر لتشغيل دالة التجربة البرمجية: تقوم بحفظ سجل موظف نموذجي (
-              <span className="font-semibold text-slate-900 dark:text-white">
-                {SAMPLE_TEST_EMPLOYEE.fullName}
-              </span>
-              ) في جدول <code className="font-mono text-amber-600 dark:text-amber-400">employees</code>،
-              ثم استرجاعه فوراً بالمعرف <code className="font-mono">{SAMPLE_TEST_EMPLOYEE.id}</code>.
+              انقر لتشغيل دالة التجربة البرمجية: تقوم باختبار كتابة وقراءة سجل تجريبي معزول في جدول{' '}
+              <code className="font-mono text-amber-600 dark:text-amber-400">employees</code> ثم حذفه وتنظيفه تلقائياً فوراً، لضمان سلامة قاعدة البيانات المحلية دون إعادة أي موظف قمت بحذفه سابقاً.
             </p>
 
             <button

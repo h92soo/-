@@ -43,6 +43,7 @@ import {
   saveEmployee,
   openGovDB,
 } from '../db/indexedDB';
+import { PaginationControl } from './PaginationControl';
 import { GovernmentEmblem } from './GovernmentEmblem';
 import { MovementReportDesigner } from './MovementReportDesigner';
 import { AddMovementModal } from './AddMovementModal';
@@ -54,10 +55,13 @@ import {
   getArabicDayOfWeek,
   OFFICIAL_DESIGNER_CREDIT,
 } from '../utils/reportExportUtils';
+import { getContractTypeLabel } from '../utils/contractTypeUtils';
+import { EmploymentTypeLabelsSettings } from '../types';
 
 interface AttendanceReportsProps {
   employees: Employee[];
   leaveRules: LeaveRulesSettings;
+  employmentLabels?: EmploymentTypeLabelsSettings;
   onEmployeesChanged?: (updated: Employee[]) => void;
   currentUser?: UserAccount | null;
   onBackToDashboard?: () => void;
@@ -67,6 +71,7 @@ interface AttendanceReportsProps {
 export function AttendanceReports({
   employees,
   leaveRules,
+  employmentLabels,
   onEmployeesChanged,
   currentUser,
   onBackToDashboard,
@@ -317,6 +322,37 @@ export function AttendanceReports({
     return list;
   }, [filteredEmployees, filters.sortField, filters.sortDirection, employeeRecordsForSelectedDate, employees]);
 
+  // Pagination states for all tables in AttendanceReports (supports 20, 30, 50, 100, 0)
+  const [dailyReportPage, setDailyReportPage] = useState<number>(1);
+  const [dailyReportPageSize, setDailyReportPageSize] = useState<number>(20);
+
+  const [monthlyReportPage, setMonthlyReportPage] = useState<number>(1);
+  const [monthlyReportPageSize, setMonthlyReportPageSize] = useState<number>(20);
+
+  const [archiveReportPage, setArchiveReportPage] = useState<number>(1);
+  const [archiveReportPageSize, setArchiveReportPageSize] = useState<number>(20);
+
+  // Reset pagination on filter change
+  useEffect(() => {
+    setDailyReportPage(1);
+    setMonthlyReportPage(1);
+    setArchiveReportPage(1);
+  }, [filters, selectedDate, selectedMonth, archiveReportType]);
+
+  // Paginated daily employees
+  const paginatedDailyEmployees = useMemo(() => {
+    if (dailyReportPageSize === 0) return sortedEmployees;
+    const start = (dailyReportPage - 1) * dailyReportPageSize;
+    return sortedEmployees.slice(start, start + dailyReportPageSize);
+  }, [sortedEmployees, dailyReportPage, dailyReportPageSize]);
+
+  // Paginated monthly employees for 31-day table
+  const paginatedMonthlyEmployees = useMemo(() => {
+    if (monthlyReportPageSize === 0) return filteredEmployees;
+    const start = (monthlyReportPage - 1) * monthlyReportPageSize;
+    return filteredEmployees.slice(start, start + monthlyReportPageSize);
+  }, [filteredEmployees, monthlyReportPage, monthlyReportPageSize]);
+
   // Counts for search bar
   const searchCounts = useMemo(() => {
     const total = employees.length;
@@ -369,6 +405,13 @@ export function AttendanceReports({
       return true;
     });
   }, [records, archiveReportType, selectedDate, selectedMonth, customStartDate, customEndDate, filters]);
+
+  // Paginated archive records for historical table
+  const paginatedArchiveRecords = useMemo(() => {
+    if (archiveReportPageSize === 0) return filteredArchiveRecords;
+    const start = (archiveReportPage - 1) * archiveReportPageSize;
+    return filteredArchiveRecords.slice(start, start + archiveReportPageSize);
+  }, [filteredArchiveRecords, archiveReportPage, archiveReportPageSize]);
 
   // Stats calculation
   const archiveStats = useMemo(() => {
@@ -1083,7 +1126,7 @@ export function AttendanceReports({
                       </td>
                     </tr>
                   ) : (
-                    sortedEmployees.map((emp, index) => {
+                    paginatedDailyEmployees.map((emp, index) => {
                       const record = employeeRecordsForSelectedDate.get(emp.id);
                       const currentStatus: AttendanceStatus = record ? record.status : 'present';
 
@@ -1094,7 +1137,7 @@ export function AttendanceReports({
                         >
                           {/* Sequence Number */}
                           <td className="p-3.5 text-center font-mono font-bold text-slate-500">
-                            {index + 1}
+                            {(dailyReportPageSize === 0 ? 0 : (dailyReportPage - 1) * dailyReportPageSize) + index + 1}
                           </td>
 
                           {/* Employee Number */}
@@ -1117,15 +1160,15 @@ export function AttendanceReports({
 
                           {/* Employment / Contract Type (No Job Title) */}
                           <td className="p-3.5">
-                            {emp.contractType === 'permanent' ? (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                                ملاك دائم
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
-                                عقد وزاري (قرار 315)
-                              </span>
-                            )}
+                            <span
+                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                emp.contractType === 'permanent'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                                  : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300 dark:border-blue-800'
+                              }`}
+                            >
+                              {getContractTypeLabel(emp.contractType, employmentLabels)}
+                            </span>
                           </td>
 
                           {/* Department */}
@@ -1255,6 +1298,19 @@ export function AttendanceReports({
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls for Daily Table */}
+            {sortedEmployees.length > 0 && (
+              <PaginationControl
+                currentPage={dailyReportPage}
+                totalItems={sortedEmployees.length}
+                pageSize={dailyReportPageSize}
+                onPageChange={setDailyReportPage}
+                onPageSizeChange={setDailyReportPageSize}
+                pageSizeOptions={[20, 30, 50, 100, 0]}
+                itemLabel="موظفاً"
+              />
+            )}
           </div>
         </div>
       )}
@@ -1315,7 +1371,7 @@ export function AttendanceReports({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
-                  {filteredEmployees.map((emp, idx) => {
+                  {paginatedMonthlyEmployees.map((emp, idx) => {
                     let countPresent = 0;
                     let countLeave = 0;
                     let countAbsent = 0;
@@ -1325,7 +1381,7 @@ export function AttendanceReports({
                       <tr key={emp.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-700/20">
                         {/* 1. Sequence Number (ت) */}
                         <td className="p-2 text-center font-mono font-bold text-slate-500">
-                          {idx + 1}
+                          {(monthlyReportPageSize === 0 ? 0 : (monthlyReportPage - 1) * monthlyReportPageSize) + idx + 1}
                         </td>
 
                         {/* 2. Full Name (اسم الموظف الكامل) */}
@@ -1450,6 +1506,19 @@ export function AttendanceReports({
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls for Monthly Sheet */}
+            {filteredEmployees.length > 0 && (
+              <PaginationControl
+                currentPage={monthlyReportPage}
+                totalItems={filteredEmployees.length}
+                pageSize={monthlyReportPageSize}
+                onPageChange={setMonthlyReportPage}
+                onPageSizeChange={setMonthlyReportPageSize}
+                pageSizeOptions={[20, 30, 50, 100, 0]}
+                itemLabel="موظفاً بالشيت"
+              />
+            )}
           </div>
         </div>
       )}
@@ -1689,10 +1758,10 @@ export function AttendanceReports({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-300">
-                  {filteredArchiveRecords.map((r, idx) => (
+                  {paginatedArchiveRecords.map((r, idx) => (
                     <tr key={r.id} className="print-break-inside-avoid">
                       <td className="p-2 border-l border-slate-300 font-mono text-center font-bold">
-                        {idx + 1}
+                        {(archiveReportPageSize === 0 ? 0 : (archiveReportPage - 1) * archiveReportPageSize) + idx + 1}
                       </td>
                       <td className="p-2 border-l border-slate-300 font-mono font-bold">
                         {r.employeeNumber}
@@ -1701,7 +1770,7 @@ export function AttendanceReports({
                         {r.employeeName || (r as any).fullName}
                       </td>
                       <td className="p-2 border-l border-slate-300">
-                        {r.contractType === 'permanent' ? 'ملاك دائم' : 'عقد وزاري (قرار 315)'}
+                        {getContractTypeLabel(r.contractType, employmentLabels)}
                       </td>
                       <td className="p-2 border-l border-slate-300">{r.department}</td>
                       <td className="p-2 border-l border-slate-300 font-bold">
@@ -1732,6 +1801,20 @@ export function AttendanceReports({
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls for Archive Table */}
+            {filteredArchiveRecords.length > 0 && (
+              <PaginationControl
+                currentPage={archiveReportPage}
+                totalItems={filteredArchiveRecords.length}
+                pageSize={archiveReportPageSize}
+                onPageChange={setArchiveReportPage}
+                onPageSizeChange={setArchiveReportPageSize}
+                pageSizeOptions={[20, 30, 50, 100, 0]}
+                itemLabel="سجلاً بالأرشيف"
+                className="no-print"
+              />
+            )}
 
             {/* Statistical Summary Box in Print */}
             <div className="p-3.5 rounded-xl border border-slate-300 bg-slate-50 text-xs font-semibold grid grid-cols-4 gap-2 text-center print-break-inside-avoid">
@@ -1799,6 +1882,7 @@ export function AttendanceReports({
         <MovementReportDesigner
           employees={employees}
           currentUser={currentUser}
+          employmentLabels={employmentLabels}
           onBackToDashboard={onBackToDashboard}
           onNavigate={onNavigate}
         />
@@ -1827,6 +1911,7 @@ export function AttendanceReports({
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
         records={filteredArchiveRecords}
+        employees={employees}
         reportScope={activeSubTab === 'monthly' ? 'monthly' : archiveReportType}
         selectedDate={selectedDate}
         selectedMonth={selectedMonth}
@@ -1834,6 +1919,7 @@ export function AttendanceReports({
         endDate={customEndDate}
         departmentName={filters.selectedDepartment === 'ALL' ? 'كافة التشكيلات' : filters.selectedDepartment}
         stats={archiveStats}
+        employmentLabels={employmentLabels}
       />
 
       {/* Detailed Log Modal */}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   CheckCircle2,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Employee, AttendanceRecord, AttendanceStatus, UserAccount, LeaveType } from '../types';
 import { saveAttendanceLogsBatch, saveEmployee } from '../db/indexedDB';
+import { employeeService } from '../services/employeeService';
 
 export interface QuickMovementActionModalProps {
   isOpen: boolean;
@@ -187,11 +189,21 @@ export const QuickMovementActionModal: React.FC<QuickMovementActionModalProps> =
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSubmitting) {
+          onClose();
+        }
+      }}
+    >
       <div
         id="quick-movement-modal"
-        className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 my-auto"
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
         <div className="p-5 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -577,6 +589,7 @@ export const QuickMovementActionModal: React.FC<QuickMovementActionModalProps> =
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

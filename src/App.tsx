@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   User,
   Lock,
@@ -14,12 +15,10 @@ import {
   LogOut,
   KeyRound,
   FileText,
-  UserCheck,
   Check,
   Info,
   Server,
   ArrowRight,
-  Sparkles,
   Users,
   Sliders,
   Database,
@@ -37,6 +36,12 @@ import {
   Home,
   ArrowLeft,
   BarChart3,
+  Monitor,
+  Award,
+  QrCode,
+  Briefcase,
+  TrendingUp,
+  Bell,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GovernmentEmblem } from './components/GovernmentEmblem';
@@ -53,12 +58,35 @@ import { DatabaseBackupManager } from './components/DatabaseBackupManager';
 import { QuickScreenToolbar } from './components/QuickScreenToolbar';
 import { AddMovementModal } from './components/AddMovementModal';
 import { AnnualCalendarHolidays } from './components/AnnualCalendarHolidays';
+import { DesktopExportModal } from './components/DesktopExportModal';
+import { ToastContainer, toast } from './components/ToastNotification';
+import { TrashModal } from './components/TrashModal';
+import { BarcodeAttendanceHub } from './components/BarcodeAttendanceHub';
+import { AllowancesPromotionsHub } from './components/AllowancesPromotionsHub';
+import { RetirementHub } from './components/RetirementHub';
+import { InteractiveAnalyticsHub } from './components/InteractiveAnalyticsHub';
+import { MasterEmployeeProfileModal } from './components/MasterEmployeeProfileModal';
+import { LicenseActivationModal } from './components/LicenseActivationModal';
+import { LicenseGeneratorModal } from './components/LicenseGeneratorModal';
+import { LicenseLockScreen } from './components/LicenseLockScreen';
+import { licenseService } from './services/licenseService';
+import { employeeService } from './services/employeeService';
+import { getTrashedEmployees, subscribeTrashChanges } from './services/employeeTrashService';
+import {
+  performAutoBackup,
+  getAutoBackupSettings,
+  getStoredAutoBackups,
+  AutoBackupRecord,
+} from './services/autoBackupService';
 import {
   UserAccount,
   Employee,
   AppearanceSettings,
   LeaveRulesSettings,
   OrganizationSettings,
+  EmploymentTypeLabelsSettings,
+  DEFAULT_EMPLOYMENT_TYPE_LABELS,
+  LicenseStatus,
 } from './types';
 import {
   DEFAULT_APPEARANCE_SETTINGS,
@@ -66,6 +94,7 @@ import {
   getSystemSetting,
   saveSystemSetting,
   getAllEmployees,
+  getSystemUsers,
 } from './db/indexedDB';
 
 // Pre-configured government accounts for instant demonstration
@@ -133,7 +162,11 @@ export type WorkspaceTab =
   | 'profile'
   | 'db_test'
   | 'backup'
-  | 'movement_designer';
+  | 'movement_designer'
+  | 'barcode_hub'
+  | 'allow_promotions'
+  | 'retirement'
+  | 'analytics';
 
 const DEFAULT_ORGANIZATION: OrganizationSettings = {
   ministryName: 'وزارة التعليم العالي والبحث العلمي',
@@ -144,8 +177,8 @@ const DEFAULT_ORGANIZATION: OrganizationSettings = {
 };
 
 export default function App() {
-  const [username, setUsername] = useState<string>('admin');
-  const [password, setPassword] = useState<string>('SAsa12589');
+  const [username, setUsername] = useState<string>('');
+  const [password, setPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [rememberMe, setRememberMe] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -160,8 +193,66 @@ export default function App() {
   const [leaveRules, setLeaveRules] = useState<LeaveRulesSettings>(DEFAULT_LEAVE_RULES);
   const [appearance, setAppearance] = useState<AppearanceSettings>(DEFAULT_APPEARANCE_SETTINGS);
   const [organization, setOrganization] = useState<OrganizationSettings>(DEFAULT_ORGANIZATION);
+  const [employmentLabels, setEmploymentLabels] = useState<EmploymentTypeLabelsSettings>(DEFAULT_EMPLOYMENT_TYPE_LABELS);
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(false);
   const [isGlobalMovementModalOpen, setIsGlobalMovementModalOpen] = useState<boolean>(false);
+  const [showDesktopExportModal, setShowDesktopExportModal] = useState<boolean>(false);
+  const [isTrashModalOpen, setIsTrashModalOpen] = useState<boolean>(false);
+  const [trashedCount, setTrashedCount] = useState<number>(() => getTrashedEmployees().length);
+  const [selectedProfileEmployeeId, setSelectedProfileEmployeeId] = useState<string | null>(null);
+  const [dailyMovementsSubTab, setDailyMovementsSubTab] = useState<'registration' | 'five_year_leaves' | 'reports'>('registration');
+
+  // Subscribe to trash bin changes globally
+  useEffect(() => {
+    const unsub = subscribeTrashChanges(() => {
+      setTrashedCount(getTrashedEmployees().length);
+    });
+    return () => unsub();
+  }, []);
+
+  // Central Employee Service Subscription (Single Source of Truth)
+  useEffect(() => {
+    const unsub = employeeService.subscribe((allEmps) => {
+      setEmployeesList(allEmps);
+    });
+    return () => unsub();
+  }, []);
+
+  // Operational Alerts state (Retirement & Exhausted Leave)
+  const [operationalAlerts, setOperationalAlerts] = useState<{
+    nearRetirementCount: number;
+    nearRetirementList: Employee[];
+    depletedLeaveCount: number;
+    depletedLeaveList: Employee[];
+  }>({
+    nearRetirementCount: 0,
+    nearRetirementList: [],
+    depletedLeaveCount: 0,
+    depletedLeaveList: [],
+  });
+
+  // Commercial Licensing & Trial Management State
+  const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [isActivationModalOpen, setIsActivationModalOpen] = useState<boolean>(false);
+  const [isGeneratorModalOpen, setIsGeneratorModalOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsub = licenseService.subscribe((st) => {
+      setLicenseStatus(st);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    employeeService.getExecutiveMetrics().then((m) => {
+      setOperationalAlerts({
+        nearRetirementCount: m.nearRetirementCount,
+        nearRetirementList: m.nearRetirementList,
+        depletedLeaveCount: m.depletedLeaveCount,
+        depletedLeaveList: m.depletedLeaveList,
+      });
+    });
+  }, [employeesList]);
 
   // Apply active Arabic font family globally to document
   useEffect(() => {
@@ -202,6 +293,9 @@ export default function App() {
       const savedOrg = await getSystemSetting<OrganizationSettings>('organization_settings', DEFAULT_ORGANIZATION);
       if (savedOrg) setOrganization(savedOrg);
 
+      const savedLabels = await getSystemSetting<EmploymentTypeLabelsSettings>('employment_type_labels', DEFAULT_EMPLOYMENT_TYPE_LABELS);
+      if (savedLabels) setEmploymentLabels(savedLabels);
+
       const emps = await getAllEmployees();
       setEmployeesList(emps);
     } catch (err) {
@@ -221,6 +315,9 @@ export default function App() {
 
         const savedOrg = await getSystemSetting<OrganizationSettings>('organization_settings', DEFAULT_ORGANIZATION);
         if (savedOrg) setOrganization(savedOrg);
+
+        const savedLabels = await getSystemSetting<EmploymentTypeLabelsSettings>('employment_type_labels', DEFAULT_EMPLOYMENT_TYPE_LABELS);
+        if (savedLabels) setEmploymentLabels(savedLabels);
 
         const emps = await getAllEmployees();
         setEmployeesList(emps);
@@ -249,6 +346,12 @@ export default function App() {
     await saveSystemSetting('organization_settings', newOrg);
   };
 
+  // Update Employment Type Labels Settings
+  const handleEmploymentLabelsChange = async (newLabels: EmploymentTypeLabelsSettings) => {
+    setEmploymentLabels(newLabels);
+    await saveSystemSetting('employment_type_labels', newLabels);
+  };
+
   // Live Digital Clock for Iraqi Official Time
   useEffect(() => {
     const updateTime = () => {
@@ -267,72 +370,95 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Handle preset quick select
-  const handleSelectPreset = (acc: typeof PRESET_ACCOUNTS[0]) => {
-    setUsername(acc.username);
-    setPassword(acc.passwordHint);
-    setErrorMessage(null);
-  };
-
-  // Submit Login Handler
-  const handleLogin = (e: React.FormEvent) => {
+  // Submit Login Handler (يدوياً)
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!username.trim() || !password.trim()) {
+    const trimmedUser = username.trim();
+    const trimmedPass = password.trim();
+
+    if (!trimmedUser || !trimmedPass) {
       setErrorMessage('يرجى إدخال اسم المستخدم وكلمة المرور للمتابعة.');
       return;
     }
 
     setIsLoading(true);
 
-    setTimeout(() => {
-      // Check credentials against presets or master password SAsa12589
-      const matched = PRESET_ACCOUNTS.find(
-        (acc) =>
-          acc.username.toLowerCase() === username.trim().toLowerCase() &&
-          acc.passwordHint === password.trim()
+    try {
+      // 1. فحص المستخدمين المعرّفين في قاعدة بيانات النظام المحلية IndexedDB
+      const dbUsers = await getSystemUsers().catch(() => []);
+      const matchedDbUser = dbUsers.find(
+        (u) =>
+          u.username.toLowerCase() === trimmedUser.toLowerCase() &&
+          u.passwordHash === trimmedPass &&
+          u.isActive !== false
       );
 
-      // Also allow admin with master password
-      if (
-        (username.trim().toLowerCase() === 'admin' && password.trim() === 'SAsa12589') ||
-        matched
-      ) {
-        const activeUser = matched || PRESET_ACCOUNTS[0];
-        setLoggedInUser(activeUser);
-        setIsLoading(false);
-      } else {
-        setIsLoading(false);
-        setErrorMessage(
-          'اسم المستخدم أو كلمة المرور غير صحيحة. يرجى التحقق أو اختيار حساب من الحسابات الجاهزة أدناه.'
-        );
-      }
-    }, 600);
+      // 2. فحص الحسابات الافتراضية
+      const matchedPreset = PRESET_ACCOUNTS.find(
+        (acc) =>
+          acc.username.toLowerCase() === trimmedUser.toLowerCase() &&
+          acc.passwordHint === trimmedPass
+      );
+
+      // 3. المشرف الرئيسي (Admin)
+      const isMasterAdmin =
+        trimmedUser.toLowerCase() === 'admin' && trimmedPass === 'SAsa12589';
+
+      setTimeout(() => {
+        if (matchedDbUser) {
+          setLoggedInUser({
+            username: matchedDbUser.username,
+            fullName: matchedDbUser.fullName,
+            jobTitle: matchedDbUser.jobTitle,
+            department: matchedDbUser.department,
+            role: matchedDbUser.role as any,
+            roleTitleAr: matchedDbUser.roleTitleAr,
+            avatarColor: 'from-amber-500 to-amber-700',
+            permissions: matchedDbUser.permissions,
+          });
+          setIsLoading(false);
+        } else if (isMasterAdmin || matchedPreset) {
+          const activeUser = matchedPreset || PRESET_ACCOUNTS[0];
+          setLoggedInUser(activeUser);
+          setIsLoading(false);
+        } else {
+          setIsLoading(false);
+          setErrorMessage(
+            'اسم المستخدم أو كلمة المرور غير صحيحة. يرجى التأكد من صحة البيانات والمحاولة مجدداً.'
+          );
+        }
+      }, 350);
+    } catch {
+      setIsLoading(false);
+      setErrorMessage('حدث خطأ أثناء تسجيل الدخول. يرجى إعادة المحاولة.');
+    }
   };
 
   const handleLogout = () => {
     setLoggedInUser(null);
+    setUsername('');
     setPassword('');
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 selection:bg-amber-500 selection:text-white relative overflow-x-hidden">
-      {/* Subtle Apple-style Background Ambient Gradients */}
+    <div className="min-h-screen flex flex-col bg-[#f8fafc] dark:bg-[#0a0f1d] text-slate-900 dark:text-slate-100 selection:bg-amber-500/20 selection:text-amber-900 dark:selection:text-amber-200 relative overflow-x-hidden">
+      {/* Subtle Apple & Government Ambient Glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
-        <div className="absolute top-[-10%] right-[-5%] w-[600px] h-[600px] rounded-full bg-emerald-500/10 dark:bg-emerald-600/10 blur-[130px]" />
-        <div className="absolute bottom-[-10%] left-[-5%] w-[600px] h-[600px] rounded-full bg-amber-500/10 dark:bg-amber-600/10 blur-[130px]" />
-        <div className="absolute top-[40%] left-[30%] w-[450px] h-[450px] rounded-full bg-blue-500/5 dark:bg-blue-600/5 blur-[120px]" />
+        <div className="absolute top-[-10%] right-[-5%] w-[650px] h-[650px] rounded-full bg-emerald-500/5 dark:bg-emerald-600/10 blur-[140px]" />
+        <div className="absolute bottom-[-10%] left-[-5%] w-[650px] h-[650px] rounded-full bg-amber-500/5 dark:bg-amber-600/10 blur-[140px]" />
+        <div className="absolute top-[35%] left-[25%] w-[500px] h-[500px] rounded-full bg-indigo-500/5 dark:bg-indigo-600/5 blur-[140px]" />
       </div>
 
       {/* 1. Desktop Window Frame Header (macOS System Bar) */}
-      <header className="relative z-10 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/70 backdrop-blur-md px-4 py-2.5 flex items-center justify-between shadow-xs">
+      <header className="relative z-10 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl px-4 py-2.5 flex items-center justify-between shadow-[0_1px_4px_rgba(0,0,0,0.02)]">
         {/* Right side in RTL: Window Traffic Controls & System State */}
         <div className="flex items-center gap-4">
           <WindowTrafficLights
-            onClose={() => alert('إغلاق نافذة النظام (جاهز لبيئة Electron)')}
-            onMinimize={() => alert('تم تصغير النافذة')}
-            onMaximize={() => alert('تم تفعيل وضع ملء الشاشة')}
+            onClose={() => toast.info('إغلاق نافذة النظام (جاهز لبيئة Electron)')}
+            onMinimize={() => toast.info('تم تصغير النافذة')}
+            onMaximize={() => toast.info('تم تفعيل وضع ملء الشاشة')}
           />
           <div className="h-4 w-px bg-slate-300 dark:bg-slate-700 hidden sm:block" />
           <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
@@ -351,8 +477,37 @@ export default function App() {
           <span className="font-mono">{currentTime || '12:00:00 م'}</span>
         </div>
 
-        {/* Left side in RTL: Theme Switcher and Desktop status */}
-        <div className="flex items-center gap-3">
+        {/* Left side in RTL: Theme Switcher, License Status and Desktop status */}
+        <div className="flex items-center gap-2.5">
+          {licenseStatus && (
+            <button
+              type="button"
+              id="top-system-license-btn"
+              onClick={() => setIsActivationModalOpen(true)}
+              className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+                licenseStatus.isLifetime
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
+                  : licenseStatus.isTrial
+                  ? licenseStatus.isExpired
+                    ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-100 animate-pulse'
+                    : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-100'
+                  : 'bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-100'
+              }`}
+              title="حالة ترخيص وتفعيل البرنامج"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">
+                {licenseStatus.isLifetime
+                  ? 'مرخص دائم مدى الحياة'
+                  : licenseStatus.isTrial
+                  ? licenseStatus.isExpired
+                    ? 'انتهت التجربة (تفعيل)'
+                    : `تجريبي: ${licenseStatus.trialDaysRemaining} يوم`
+                  : `مرخص (${licenseStatus.daysRemaining} يوم)`}
+              </span>
+            </button>
+          )}
+
           <div className="hidden lg:flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
             <Laptop className="w-3.5 h-3.5 text-slate-500" />
             <span>نظام مكتبي محلي</span>
@@ -424,9 +579,10 @@ export default function App() {
                         id="username"
                         type="text"
                         required
+                        autoComplete="username"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
-                        placeholder="أدخل اسم المستخدم (مثال: admin)"
+                        placeholder="أدخل اسم المستخدم أو الرقم الوظيفي"
                         className="w-full pr-10 pl-4 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all"
                         dir="ltr"
                         style={{ textAlign: 'right' }}
@@ -460,9 +616,10 @@ export default function App() {
                         id="password"
                         type={showPassword ? 'text' : 'password'}
                         required
+                        autoComplete="current-password"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
-                        placeholder="••••••••••••"
+                        placeholder="أدخل كلمة المرور"
                         className="w-full pr-10 pl-10 py-2.5 text-sm rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500 transition-all font-mono"
                         dir="ltr"
                       />
@@ -517,50 +674,6 @@ export default function App() {
                   </button>
                 </form>
 
-                {/* Quick Demo Credentials Bar (حسابات تجريبية سريعة) */}
-                <div className="mt-6 pt-5 border-t border-slate-200/80 dark:border-slate-800">
-                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-2 flex items-center gap-1.5">
-                    <UserCheck className="w-3.5 h-3.5 text-amber-500" />
-                    <span>حسابات سريعة للمعاينة واختبار الصلاحيات (RBAC):</span>
-                  </p>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {PRESET_ACCOUNTS.map((acc) => {
-                      const isSelected = username === acc.username;
-                      return (
-                        <button
-                          key={acc.username}
-                          type="button"
-                          onClick={() => handleSelectPreset(acc)}
-                          className={`p-2 rounded-xl text-[11px] text-right transition-all border cursor-pointer ${
-                            isSelected
-                              ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400/80 text-amber-900 dark:text-amber-200 shadow-xs'
-                              : 'bg-slate-50/70 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          <div className="font-semibold truncate">{acc.roleTitleAr.split(' ')[0]} {acc.roleTitleAr.split(' ')[1] || ''}</div>
-                          <div className="text-[10px] text-slate-400 dark:text-slate-500 truncate font-mono">
-                            {acc.username}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Direct Launch Button to Employee Management */}
-                  <button
-                    type="button"
-                    id="quick-demo-admin-login-btn"
-                    onClick={() => {
-                      setLoggedInUser(PRESET_ACCOUNTS[0]);
-                      setActiveWorkspaceTab('employees');
-                    }}
-                    className="w-full mt-2.5 py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-300/80 dark:border-amber-800/70 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    <span>دخول فوري كمدير النظام لمعاينة سجل الموظفين (IndexedDB)</span>
-                  </button>
-                </div>
-
                 {/* Offline-First Security Notice */}
                 <div className="mt-5 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
                   <span className="flex items-center gap-1.5">
@@ -571,11 +684,21 @@ export default function App() {
                     100% Offline
                   </span>
                 </div>
+
+                {/* Desktop App Installer / Exe Launcher trigger on login screen */}
+                <button
+                  type="button"
+                  onClick={() => setShowDesktopExportModal(true)}
+                  className="w-full mt-3 py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Monitor className="w-3.5 h-3.5 text-amber-500" />
+                  <span>تثبيت أو تشغيل كتطبيق سطح مكتب Windows (exe.)</span>
+                </button>
               </div>
 
               {/* IndexedDB Local Persistence Tester Card */}
               <div className="mt-4">
-                <IndexedDBTester compact />
+                <IndexedDBTester compact onEmployeeDataChanged={handleReloadAllData} />
               </div>
             </motion.div>
           ) : (
@@ -589,10 +712,10 @@ export default function App() {
               className="w-full max-w-7xl mx-auto"
             >
               {/* Desktop Window Container with Frosted Glass & Border */}
-              <div className="relative rounded-3xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col min-h-[780px]">
+              <div className="relative rounded-3xl bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl border border-slate-200/80 dark:border-slate-800 shadow-[0_12px_40px_rgba(15,23,42,0.06)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.4)] overflow-hidden flex flex-col min-h-[780px]">
                 
                 {/* 1. Desktop Window Frame Header (macOS title bar with traffic lights & breadcrumb) */}
-                <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/70 flex flex-wrap items-center justify-between gap-3 select-none">
+                <div className="px-5 py-3 border-b border-slate-200/80 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/70 flex flex-wrap items-center justify-between gap-3 select-none">
                   {/* Traffic Lights & App Title */}
                   <div className="flex items-center gap-3">
                     <WindowTrafficLights
@@ -616,7 +739,12 @@ export default function App() {
                         {activeWorkspaceTab === 'employees' && 'إدارة شؤون الموظفين'}
                         {activeWorkspaceTab === 'daily_movements' && 'مركز الحركات اليومية الفورية والتقارير'}
                         {activeWorkspaceTab === 'reports' && 'تقارير الدوام والشيت السنوي'}
+                        {activeWorkspaceTab === 'movement_designer' && 'المخطط البياني ومصمم تقارير الحركات'}
+                        {activeWorkspaceTab === 'analytics' && 'الرسوم البيانية التفاعلية للموظفين (Recharts)'}
                         {activeWorkspaceTab === 'calendar' && 'التقويم السنوي والعطل الرسمية والمناسبات (رئاسة الوزراء)'}
+                        {activeWorkspaceTab === 'barcode_hub' && 'منظومة أجهزة البصمة الذكية والبطاقات الموحدة'}
+                        {activeWorkspaceTab === 'allow_promotions' && 'العلاوات السنوية والترفيعات الوظيفية'}
+                        {activeWorkspaceTab === 'retirement' && 'هيئة وشؤون التقاعد (السن القانوني 60)'}
                         {activeWorkspaceTab === 'settings' && 'لوحة الإعدادات وقواعد الدوام والصلاحيات'}
                         {activeWorkspaceTab === 'profile' && 'بيانات المستخدم النشط ومصفوفة الصلاحيات'}
                         {activeWorkspaceTab === 'db_test' && 'فحص قاعدة بيانات IndexedDB المحلية'}
@@ -639,6 +767,89 @@ export default function App() {
                       <span>100% محلي Offline</span>
                     </div>
 
+                    {/* Operational Alerts Toast Trigger */}
+                    <button
+                      type="button"
+                      id="header-notifications-toast-btn"
+                      onClick={() => {
+                        let triggered = 0;
+                        if (operationalAlerts.nearRetirementCount > 0) {
+                          const firstEmp = operationalAlerts.nearRetirementList[0];
+                          toast.retirementAlert(
+                            `تنبيه التقاعد القانوني (${operationalAlerts.nearRetirementCount} موظف)`,
+                            `الموظف (${firstEmp?.fullName || 'كوادر'}) بلغ أو يقترب من السن القانوني للتقاعد (60 سنة).`,
+                            () => setActiveWorkspaceTab('retirement'),
+                            'إجراءات التقاعد'
+                          );
+                          triggered++;
+                        }
+                        if (operationalAlerts.depletedLeaveCount > 0) {
+                          const firstDep = operationalAlerts.depletedLeaveList[0];
+                          toast.leaveAlert(
+                            `تنبيه انتهاء رصيد الإجازات (${operationalAlerts.depletedLeaveCount} موظف)`,
+                            `الموظف (${firstDep?.fullName || 'كوادر'}) استنفد كامل رصيد إجازاته السنوية المتاحة (الرصيد المتبقي: 0 يوم).`,
+                            () => setActiveWorkspaceTab('employees'),
+                            'متابعة الرصيد'
+                          );
+                          triggered++;
+                        }
+                        if (triggered === 0) {
+                          toast.info('كافة سجلات الكوادر والتقاعد والإجازات منتظمة ولا توجد تنبيهات عاجلة.');
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-xl border border-slate-200/90 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all flex items-center gap-1.5 text-xs font-semibold cursor-pointer shadow-2xs"
+                      title="تنبيهات النظام الفورية (التقاعد والإجازات)"
+                    >
+                      <Bell className="w-3.5 h-3.5 text-amber-500" />
+                      <span className="hidden sm:inline">الإشعارات</span>
+                      {operationalAlerts.nearRetirementCount + operationalAlerts.depletedLeaveCount > 0 && (
+                        <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-mono leading-none">
+                          {operationalAlerts.nearRetirementCount + operationalAlerts.depletedLeaveCount}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Commercial License Status Button */}
+                    {licenseStatus && (
+                      <button
+                        type="button"
+                        id="workspace-license-status-btn"
+                        onClick={() => setIsActivationModalOpen(true)}
+                        className={`px-2.5 py-1 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+                          licenseStatus.isLifetime
+                            ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
+                            : licenseStatus.isTrial
+                            ? licenseStatus.isExpired
+                              ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-100 animate-pulse'
+                              : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:bg-amber-100'
+                            : 'bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-100'
+                        }`}
+                        title="حالة ترخيص وتفعيل البرنامج"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">
+                          {licenseStatus.isLifetime
+                            ? 'مرخص دائم مدى الحياة'
+                            : licenseStatus.isTrial
+                            ? licenseStatus.isExpired
+                              ? 'انتهت التجربة (تفعيل)'
+                              : `تجريبي (${licenseStatus.trialDaysRemaining} يوم)`
+                            : `مرخص (${licenseStatus.daysRemaining} يوم)`}
+                        </span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      id="desktop-app-export-btn"
+                      onClick={() => setShowDesktopExportModal(true)}
+                      className="px-2.5 py-1 rounded-xl border border-amber-300/80 dark:border-amber-700/80 bg-amber-50/80 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors flex items-center gap-1.5 text-xs font-semibold cursor-pointer shadow-2xs"
+                      title="تشغيل أو تثبيت كتطبيق سطح مكتب Windows (.exe)"
+                    >
+                      <Monitor className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                      <span className="hidden sm:inline">تطبيق سطح المكتب (exe)</span>
+                    </button>
+
                     <button
                       type="button"
                       id="header-logout-btn"
@@ -652,6 +863,25 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Trial Expiry Warning Banner (Shown when trial has <= 3 days left) */}
+                {licenseStatus?.isTrial && licenseStatus.trialDaysRemaining <= 3 && !licenseStatus.isExpired && (
+                  <div className="bg-amber-500/15 border-b border-amber-500/30 px-5 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900 dark:text-amber-200">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-600 animate-pulse shrink-0" />
+                      <span>
+                        تنبيه: أوشكت الفترة التجريبية على الانتهاء (المتبقي: {licenseStatus.trialDaysRemaining} {licenseStatus.trialDaysRemaining === 1 ? 'يوم واحد' : 'أيام'}). يرجى شراء كود التفعيل لضمان استمرار عمل المنظومة دون توقف.
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsActivationModalOpen(true)}
+                      className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-xs cursor-pointer transition-colors"
+                    >
+                      تفعيل وشراء الآن ⚡
+                    </button>
+                  </div>
+                )}
+
                 {/* 2. Desktop Body: Conditional Hub Layout or Slate-950 Sidebar + Viewport */}
                 {appearance.navigationLayout === 'dashboard_hub' && activeWorkspaceTab === 'dashboard' ? (
                   /* Full-width Executive Dashboard Hub */
@@ -662,10 +892,15 @@ export default function App() {
                       employees={employeesList}
                       appearance={appearance}
                       onNavigate={(tab) => setActiveWorkspaceTab(tab)}
+                      onNavigateToFiveYearLeave={() => {
+                        setDailyMovementsSubTab('five_year_leaves');
+                        setActiveWorkspaceTab('daily_movements');
+                      }}
                       onToggleLayout={(layout) =>
                         handleAppearanceChange({ ...appearance, navigationLayout: layout })
                       }
                       onOpenMovementModal={() => setIsGlobalMovementModalOpen(true)}
+                      onOpenLicense={() => setIsActivationModalOpen(true)}
                       onLogout={handleLogout}
                       currentTime={currentTime}
                     />
@@ -955,6 +1190,51 @@ export default function App() {
                               </span>
                             </button>
 
+                            {/* 3.6. Interactive Analytics & Recharts */}
+                            <button
+                              type="button"
+                              id="nav-analytics-btn"
+                              onClick={() => setActiveWorkspaceTab('analytics')}
+                              className={`w-full text-right p-2.5 rounded-2xl transition-all cursor-pointer flex items-center justify-between group ${
+                                activeWorkspaceTab === 'analytics'
+                                  ? 'bg-cyan-600 text-white shadow-md shadow-cyan-600/25 font-semibold'
+                                  : 'text-slate-300 hover:bg-slate-900 hover:text-white'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                                    activeWorkspaceTab === 'analytics'
+                                      ? 'bg-white/20 text-white'
+                                      : 'bg-cyan-500/20 text-cyan-400 group-hover:bg-cyan-500/30'
+                                  }`}
+                                >
+                                  <TrendingUp className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <div className="text-xs font-bold">الرسوم البيانية التفاعلية</div>
+                                  <div
+                                    className={`text-[10px] ${
+                                      activeWorkspaceTab === 'analytics'
+                                        ? 'text-cyan-100'
+                                        : 'text-slate-400'
+                                    }`}
+                                  >
+                                    تحليلات الأقسام والدرجات
+                                  </div>
+                                </div>
+                              </div>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                  activeWorkspaceTab === 'analytics'
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-cyan-950 text-cyan-300 border border-cyan-800/60'
+                                }`}
+                              >
+                                Recharts 📈
+                              </span>
+                            </button>
+
                             {/* 4. Annual Calendar & Holidays (Cabinet of Iraq 2026) */}
                             <button
                               type="button"
@@ -997,6 +1277,175 @@ export default function App() {
                                 }`}
                               >
                                 2026
+                              </span>
+                            </button>
+
+                            {/* 4.1. Barcode & Smart Cards Hub */}
+                            <button
+                              type="button"
+                              id="nav-barcode-btn"
+                              onClick={() => setActiveWorkspaceTab('barcode_hub')}
+                              aria-describedby="nav-barcode-tooltip"
+                              className={`w-full text-right p-2.5 rounded-2xl transition-all duration-200 cursor-pointer flex items-center justify-between group relative ${
+                                activeWorkspaceTab === 'barcode_hub'
+                                  ? 'bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 text-white shadow-lg shadow-indigo-600/30 font-semibold ring-1 ring-indigo-400/40'
+                                  : 'text-slate-300 hover:text-white hover:bg-slate-900/90 hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-950/60 border border-transparent hover:-translate-y-0.5 active:translate-y-0'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`relative w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-all duration-300 overflow-hidden ${
+                                    activeWorkspaceTab === 'barcode_hub'
+                                      ? 'bg-white/20 text-white shadow-xs ring-1 ring-white/30'
+                                      : 'bg-indigo-500/20 text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white group-hover:scale-110 group-hover:ring-2 group-hover:ring-indigo-400/60 group-hover:shadow-[0_0_16px_rgba(99,102,241,0.65)]'
+                                  }`}
+                                >
+                                  {/* Scanner laser sweep beam on hover */}
+                                  <span className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-cyan-300 to-transparent top-0 opacity-0 group-hover:opacity-100 group-hover:translate-y-8 transition-all duration-700 ease-in-out pointer-events-none" />
+                                  {/* Live beacon dot */}
+                                  <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-cyan-400 opacity-0 group-hover:opacity-100 group-hover:animate-ping pointer-events-none" />
+                                  <QrCode className="w-4 h-4 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-6" />
+                                </div>
+                                <div>
+                                  <div className="text-xs font-bold transition-colors duration-200 group-hover:text-white">
+                                    أجهزة البصمة والبطاقات الذكية
+                                  </div>
+                                  <div
+                                    className={`text-[10px] transition-colors duration-200 ${
+                                      activeWorkspaceTab === 'barcode_hub'
+                                        ? 'text-indigo-100'
+                                        : 'text-slate-400 group-hover:text-indigo-300'
+                                    }`}
+                                  >
+                                    إدارة أجهزة البصمة والآي بي والتقارير
+                                  </div>
+                                </div>
+                              </div>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-semibold transition-all duration-200 flex items-center gap-1 ${
+                                  activeWorkspaceTab === 'barcode_hub'
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-indigo-950 text-indigo-300 border border-indigo-800/60 group-hover:bg-indigo-500 group-hover:text-white group-hover:border-indigo-400 group-hover:scale-105 group-hover:shadow-sm'
+                                }`}
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 opacity-0 group-hover:opacity-100 group-hover:animate-pulse transition-opacity" />
+                                QR ⚡
+                              </span>
+
+                              {/* Custom Interactive Tooltip (تلميح مخصص لعمليات المسح الفوري) */}
+                              <div
+                                id="nav-barcode-tooltip"
+                                role="tooltip"
+                                className="absolute bottom-full right-0 left-0 mb-2.5 p-3 rounded-2xl bg-slate-900/95 backdrop-blur-md text-white border border-indigo-500/50 shadow-2xl shadow-indigo-950/80 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 ease-out transform translate-y-1 group-hover:translate-y-0 pointer-events-none z-50 text-right"
+                              >
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <div className="flex items-center gap-1.5 text-indigo-300 font-bold text-[11px]">
+                                    <span className="relative flex h-2 w-2">
+                                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                                      <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                                    </span>
+                                    <QrCode className="w-3.5 h-3.5 text-cyan-400" />
+                                    <span>المسح الفوري المباشر</span>
+                                  </div>
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono font-semibold">
+                                    SCAN ⚡
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-300 leading-relaxed font-normal">
+                                  هذا الزر مخصص لـ <strong className="text-white font-semibold">عمليات المسح الفوري</strong> عبر كاميرا الحاسوب أو قارئ الباركود، لتسجيل الحضور اللحظي وطباعة الباجات الذكية.
+                                </p>
+                                {/* Tooltip pointer triangle */}
+                                <div className="absolute -bottom-1.5 right-6 w-3 h-3 bg-slate-900 border-b border-l border-indigo-500/50 rotate-[-45deg]" />
+                              </div>
+                            </button>
+
+                            {/* 4.2. Annual Allowances & Promotions */}
+                            <button
+                              type="button"
+                              id="nav-allowances-btn"
+                              onClick={() => setActiveWorkspaceTab('allow_promotions')}
+                              className={`w-full text-right p-2.5 rounded-2xl transition-all cursor-pointer flex items-center justify-between group ${
+                                activeWorkspaceTab === 'allow_promotions'
+                                  ? 'bg-amber-600 text-white shadow-md shadow-amber-600/25 font-semibold'
+                                  : 'text-slate-300 hover:bg-slate-900 hover:text-white'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                                    activeWorkspaceTab === 'allow_promotions'
+                                      ? 'bg-white/20 text-white'
+                                      : 'bg-amber-500/20 text-amber-400 group-hover:bg-amber-500/30'
+                                  }`}
+                                >
+                                  <Award className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <div className="text-xs font-bold">العلاوات والترفيعات</div>
+                                  <div
+                                    className={`text-[10px] ${
+                                      activeWorkspaceTab === 'allow_promotions'
+                                        ? 'text-amber-100'
+                                        : 'text-slate-400'
+                                    }`}
+                                  >
+                                    استحقاق الدرجات والأوامر
+                                  </div>
+                                </div>
+                              </div>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                  activeWorkspaceTab === 'allow_promotions'
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-amber-950 text-amber-300 border border-amber-800/60'
+                                }`}
+                              >
+                                ترفيع
+                              </span>
+                            </button>
+
+                            {/* 4.3. Retirement Hub */}
+                            <button
+                              type="button"
+                              id="nav-retirement-btn"
+                              onClick={() => setActiveWorkspaceTab('retirement')}
+                              className={`w-full text-right p-2.5 rounded-2xl transition-all cursor-pointer flex items-center justify-between group ${
+                                activeWorkspaceTab === 'retirement'
+                                  ? 'bg-purple-600 text-white shadow-md shadow-purple-600/25 font-semibold'
+                                  : 'text-slate-300 hover:bg-slate-900 hover:text-white'
+                              }`}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div
+                                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+                                    activeWorkspaceTab === 'retirement'
+                                      ? 'bg-white/20 text-white'
+                                      : 'bg-purple-500/20 text-purple-400 group-hover:bg-purple-500/30'
+                                  }`}
+                                >
+                                  <Briefcase className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <div className="text-xs font-bold">هيئة وشؤون التقاعد</div>
+                                  <div
+                                    className={`text-[10px] ${
+                                      activeWorkspaceTab === 'retirement'
+                                        ? 'text-purple-100'
+                                        : 'text-slate-400'
+                                    }`}
+                                  >
+                                    السن القانوني 60 وأرشفة الخدمة
+                                  </div>
+                                </div>
+                              </div>
+                              <span
+                                className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                                  activeWorkspaceTab === 'retirement'
+                                    ? 'bg-white/20 text-white'
+                                    : 'bg-purple-950 text-purple-300 border border-purple-800/60'
+                                }`}
+                              >
+                                سن 60
                               </span>
                             </button>
 
@@ -1232,6 +1681,8 @@ export default function App() {
                         onToggleDarkMode={toggleDarkMode}
                         onOpenMovementModal={() => setIsGlobalMovementModalOpen(true)}
                         onOpenCalendar={() => setActiveWorkspaceTab('calendar')}
+                        onOpenTrash={() => setIsTrashModalOpen(true)}
+                        trashedCount={trashedCount}
                       />
 
                       <AnimatePresence mode="wait">
@@ -1250,6 +1701,10 @@ export default function App() {
                               employees={employeesList}
                               appearance={appearance}
                               onNavigate={(tab) => setActiveWorkspaceTab(tab)}
+                              onNavigateToFiveYearLeave={() => {
+                                setDailyMovementsSubTab('five_year_leaves');
+                                setActiveWorkspaceTab('daily_movements');
+                              }}
                               onToggleLayout={(layout) =>
                                 handleAppearanceChange({ ...appearance, navigationLayout: layout })
                               }
@@ -1272,9 +1727,12 @@ export default function App() {
                             <EmployeeManagement
                               appearance={appearance}
                               leaveRules={leaveRules}
+                              employmentLabels={employmentLabels}
+                              initialEmployees={employeesList}
                               onEmployeesChanged={setEmployeesList}
                               onBackToDashboard={() => setActiveWorkspaceTab('dashboard')}
                               onNavigate={(tab) => setActiveWorkspaceTab(tab)}
+                              currentUser={loggedInUser}
                             />
                           </motion.div>
                         )}
@@ -1292,6 +1750,8 @@ export default function App() {
                               employees={employeesList}
                               leaveRules={leaveRules}
                               organization={organization}
+                              employmentLabels={employmentLabels}
+                              initialSubTab={dailyMovementsSubTab}
                               onEmployeesChanged={setEmployeesList}
                               onBackToDashboard={() => setActiveWorkspaceTab('dashboard')}
                               onNavigate={(tab) => setActiveWorkspaceTab(tab)}
@@ -1311,6 +1771,7 @@ export default function App() {
                             <AttendanceReports
                               employees={employeesList}
                               leaveRules={leaveRules}
+                              employmentLabels={employmentLabels}
                               onEmployeesChanged={setEmployeesList}
                               currentUser={loggedInUser}
                               onBackToDashboard={() => setActiveWorkspaceTab('dashboard')}
@@ -1331,6 +1792,7 @@ export default function App() {
                             <MovementReportDesigner
                               employees={employeesList}
                               currentUser={loggedInUser}
+                              employmentLabels={employmentLabels}
                               onBackToDashboard={() => setActiveWorkspaceTab('dashboard')}
                               onNavigate={(tab) => setActiveWorkspaceTab(tab)}
                             />
@@ -1373,9 +1835,90 @@ export default function App() {
                               onLeaveRulesChange={handleLeaveRulesChange}
                               organization={organization}
                               onOrganizationChange={handleOrganizationChange}
+                              employmentLabels={employmentLabels}
+                              onEmploymentLabelsChange={handleEmploymentLabelsChange}
                               onRestoreComplete={handleReloadAllData}
                               onBackToDashboard={() => setActiveWorkspaceTab('dashboard')}
                               onNavigate={(tab) => setActiveWorkspaceTab(tab)}
+                              onOpenLicense={() => setIsActivationModalOpen(true)}
+                              onOpenLicenseGenerator={() => setIsGeneratorModalOpen(true)}
+                            />
+                          </motion.div>
+                        )}
+
+                        {/* Tab: Barcode & Smart Badges Hub */}
+                        {activeWorkspaceTab === 'barcode_hub' && (
+                          <motion.div
+                            key="tab-barcode-hub"
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 10 }}
+                            transition={{ duration: 0.18 }}
+                            className="max-w-6xl mx-auto"
+                          >
+                            <BarcodeAttendanceHub
+                              organization={organization}
+                              onOpenEmployeeProfile={(empId) => setSelectedProfileEmployeeId(empId)}
+                              onBackToDashboard={() => setActiveWorkspaceTab('dashboard')}
+                              employees={employeesList}
+                              currentUser={loggedInUser}
+                              leaveRules={leaveRules}
+                            />
+                          </motion.div>
+                        )}
+
+                        {/* Tab: Annual Allowances & Promotions Hub */}
+                        {activeWorkspaceTab === 'allow_promotions' && (
+                          <motion.div
+                            key="tab-allowances-promotions"
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 10 }}
+                            transition={{ duration: 0.18 }}
+                            className="max-w-6xl mx-auto"
+                          >
+                            <AllowancesPromotionsHub
+                              organization={organization}
+                              onOpenEmployeeProfile={(empId) => setSelectedProfileEmployeeId(empId)}
+                              onBackToDashboard={() => setActiveWorkspaceTab('dashboard')}
+                            />
+                          </motion.div>
+                        )}
+
+                        {/* Tab: Retirement & Pension Affairs Hub */}
+                        {activeWorkspaceTab === 'retirement' && (
+                          <motion.div
+                            key="tab-retirement"
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 10 }}
+                            transition={{ duration: 0.18 }}
+                            className="max-w-6xl mx-auto"
+                          >
+                            <RetirementHub
+                              organization={organization}
+                              onOpenEmployeeProfile={(empId) => setSelectedProfileEmployeeId(empId)}
+                              onBackToDashboard={() => setActiveWorkspaceTab('dashboard')}
+                            />
+                          </motion.div>
+                        )}
+
+                        {/* Tab: Interactive Analytics Hub (Recharts) */}
+                        {activeWorkspaceTab === 'analytics' && (
+                          <motion.div
+                            key="tab-analytics"
+                            initial={{ opacity: 0, x: -10 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 10 }}
+                            transition={{ duration: 0.18 }}
+                            className="max-w-6xl mx-auto"
+                          >
+                            <InteractiveAnalyticsHub
+                              employees={employeesList}
+                              organization={organization}
+                              currentUser={loggedInUser}
+                              onBackToDashboard={() => setActiveWorkspaceTab('dashboard')}
+                              onOpenEmployeeProfile={(empId) => setSelectedProfileEmployeeId(empId)}
                             />
                           </motion.div>
                         )}
@@ -1533,7 +2076,7 @@ export default function App() {
                               فاحص قاعدة البيانات المحلية
                             </span>
                           </div>
-                          <IndexedDBTester />
+                          <IndexedDBTester onEmployeeDataChanged={handleReloadAllData} />
                         </motion.div>
                       )}
 
@@ -1572,9 +2115,40 @@ export default function App() {
                     setEmployeesList((prev) =>
                       prev.map((e) => (e.id === updatedEmp.id ? updatedEmp : e))
                     );
+                    toast.success(
+                      `تم تسجيل ${newRec.movementTitle || 'الحركة'} وتحديث رصيد (${updatedEmp.fullName}) إلى ${updatedEmp.remainingBalance} يوماً`
+                    );
+                  } else {
+                    toast.success(`تم تسجيل ${newRec.movementTitle || 'الحركة'} بنجاح للموظف (${newRec.employeeName || ''})`);
                   }
                 }}
               />
+
+              {/* Master Unified Employee Profile Modal (Single Source of Truth) */}
+              {selectedProfileEmployeeId && (
+                <MasterEmployeeProfileModal
+                  isOpen={Boolean(selectedProfileEmployeeId)}
+                  onClose={() => setSelectedProfileEmployeeId(null)}
+                  employeeId={selectedProfileEmployeeId}
+                  organization={organization}
+                  leaveRules={leaveRules}
+                  onOpenMovementModal={(empId, cat) => {
+                    setIsGlobalMovementModalOpen(true);
+                  }}
+                  onGrantAllowance={(emp) => {
+                    setActiveWorkspaceTab('allow_promotions');
+                    setSelectedProfileEmployeeId(null);
+                  }}
+                  onPromoteEmployee={(emp) => {
+                    setActiveWorkspaceTab('allow_promotions');
+                    setSelectedProfileEmployeeId(null);
+                  }}
+                  onRetireEmployee={(emp) => {
+                    setActiveWorkspaceTab('retirement');
+                    setSelectedProfileEmployeeId(null);
+                  }}
+                />
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -1608,50 +2182,149 @@ export default function App() {
       </footer>
 
       {/* Help & Forgot Password Modal */}
-      <AnimatePresence>
-        {showHelpModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-6 border border-slate-200 dark:border-slate-800 shadow-2xl"
+      {showHelpModal && typeof document !== 'undefined' && createPortal(
+        <div
+          className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowHelpModal(false);
+            }
+          }}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 p-6 border border-slate-200 dark:border-slate-800 shadow-2xl animate-in zoom-in-95 duration-150 my-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
+                <Info className="w-5 h-5" />
+              </div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                المساعدة واستعادة كلمة المرور
+              </h3>
+            </div>
+
+            <div className="text-xs text-slate-600 dark:text-slate-300 space-y-2.5 leading-relaxed">
+              <p>
+                وفقاً للضوابط الأمنية المعمول بها في أنظمة سطح المكتب الحكومية، يتم تعيين وتصفير
+                كلمات المرور مركزياً من خلال المشرف العام للمنظومة أو مسؤول تكنولوجيا المعلومات.
+              </p>
+              <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-1">
+                <div className="font-semibold text-slate-800 dark:text-slate-200">
+                  الدعم الفني والبرمجي:
+                </div>
+                <div>المهندس: حسين عبد المنذر</div>
+                <div>الهاتف: <span className="font-mono">07711145014</span></div>
+                <div>التليجرام: <span className="font-mono">@h92so</span></div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowHelpModal(false)}
+              className="w-full mt-4 py-2 px-4 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition-opacity cursor-pointer"
             >
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
-                  <Info className="w-5 h-5" />
-                </div>
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  المساعدة واستعادة كلمة المرور
-                </h3>
-              </div>
-
-              <div className="text-xs text-slate-600 dark:text-slate-300 space-y-2.5 leading-relaxed">
-                <p>
-                  وفقاً للضوابط الأمنية المعمول بها في أنظمة سطح المكتب الحكومية، يتم تعيين وتصفير
-                  كلمات المرور مركزياً من خلال المشرف العام للمنظومة أو مسؤول تكنولوجيا المعلومات.
-                </p>
-                <div className="p-3 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-1">
-                  <div className="font-semibold text-slate-800 dark:text-slate-200">
-                    الدعم الفني والبرمجي:
-                  </div>
-                  <div>المهندس: حسين عبد المنذر</div>
-                  <div>الهاتف: <span className="font-mono">07711145014</span></div>
-                  <div>التليجرام: <span className="font-mono">@h92so</span></div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowHelpModal(false)}
-                className="w-full mt-4 py-2 px-4 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-white dark:text-slate-900 hover:opacity-90 transition-opacity"
-              >
-                إغلاق النافذة
-              </button>
-            </motion.div>
+              إغلاق النافذة
+            </button>
           </div>
-        )}
-      </AnimatePresence>
+        </div>,
+        document.body
+      )}
+
+      {/* Desktop App (.exe) Modal */}
+      <DesktopExportModal
+        isOpen={showDesktopExportModal}
+        onClose={() => setShowDesktopExportModal(false)}
+      />
+
+      {/* Global Trash Bin Modal */}
+      <TrashModal
+        isOpen={isTrashModalOpen}
+        onClose={() => setIsTrashModalOpen(false)}
+        allCurrentEmployees={employeesList}
+        onEmployeesRestored={(restored) => {
+          setEmployeesList((prev) => {
+            const restoredIds = new Set(restored.map((r) => r.id));
+            const filtered = prev.filter((p) => !restoredIds.has(p.id));
+            return [...restored, ...filtered];
+          });
+          toast.success(`تمت استعادة (${restored.length}) من الموظفين بنجاح`);
+        }}
+        onEmployeesDeletedPermanently={(deletedIds) => {
+          setEmployeesList((prev) => prev.filter((e) => !deletedIds.includes(e.id)));
+        }}
+      />
+
+      {/* Global Master Unified Employee Profile Modal */}
+      {selectedProfileEmployeeId && (
+        <MasterEmployeeProfileModal
+          isOpen={Boolean(selectedProfileEmployeeId)}
+          onClose={() => setSelectedProfileEmployeeId(null)}
+          employeeId={selectedProfileEmployeeId}
+          organization={organization}
+          leaveRules={leaveRules}
+          onEditEmployee={() => {
+            setSelectedProfileEmployeeId(null);
+            setActiveWorkspaceTab('employees');
+          }}
+          onOpenMovementModal={(_empId, _cat) => {
+            setSelectedProfileEmployeeId(null);
+            setIsGlobalMovementModalOpen(true);
+          }}
+          onGrantAllowance={() => {
+            setSelectedProfileEmployeeId(null);
+            setActiveWorkspaceTab('allow_promotions');
+          }}
+          onPromoteEmployee={() => {
+            setSelectedProfileEmployeeId(null);
+            setActiveWorkspaceTab('allow_promotions');
+          }}
+          onRetireEmployee={() => {
+            setSelectedProfileEmployeeId(null);
+            setActiveWorkspaceTab('retirement');
+          }}
+        />
+      )}
+
+      {/* Commercial License Lock Screen if trial expired and no active license */}
+      {licenseStatus && !licenseStatus.isLicensed && licenseStatus.isExpired && (
+        <LicenseLockScreen
+          status={licenseStatus}
+          organization={organization}
+          onOpenGenerator={() => setIsGeneratorModalOpen(true)}
+          onActivated={() => {
+            licenseService.getStatus().then(setLicenseStatus);
+          }}
+        />
+      )}
+
+      {/* Commercial License Details & Activation Modal */}
+      <LicenseActivationModal
+        isOpen={isActivationModalOpen}
+        onClose={() => setIsActivationModalOpen(false)}
+        status={licenseStatus}
+        organization={organization}
+        onOpenGenerator={() => {
+          setIsActivationModalOpen(false);
+          setIsGeneratorModalOpen(true);
+        }}
+        onActivated={() => {
+          licenseService.getStatus().then(setLicenseStatus);
+        }}
+      />
+
+      {/* Seller & Master Key Generator Modal */}
+      <LicenseGeneratorModal
+        isOpen={isGeneratorModalOpen}
+        onClose={() => setIsGeneratorModalOpen(false)}
+        organization={organization}
+        onLicenseChanged={() => {
+          licenseService.getStatus().then(setLicenseStatus);
+        }}
+      />
+
+      {/* Global Toast Notification System */}
+      <ToastContainer />
     </div>
   );
 }

@@ -34,7 +34,12 @@ import {
   Home,
   Zap,
   FileText,
+  Briefcase,
+  Award,
+  QrCode,
+  Key,
 } from 'lucide-react';
+import { licenseService } from '../services/licenseService';
 import {
   LeaveRulesSettings,
   AppearanceSettings,
@@ -44,7 +49,15 @@ import {
   FontFamilyOption,
   OrganizationSettings,
   WorkspaceTab,
+  EmploymentTypeLabelsSettings,
+  DEFAULT_EMPLOYMENT_TYPE_LABELS,
+  CareerSystemSettings,
+  DEFAULT_CAREER_SETTINGS,
+  LicenseStatus,
+  SystemFeatureConfig,
+  DEFAULT_SYSTEM_FEATURE_CONFIG,
 } from '../types';
+import { employeeService } from '../services/employeeService';
 import { ARABIC_FONTS_CATALOG } from './QuickScreenToolbar';
 import {
   DEFAULT_LEAVE_RULES,
@@ -54,8 +67,11 @@ import {
   getSystemUsers,
   saveSystemUser,
   deleteSystemUser,
+  saveEmploymentTypeLabels,
+  getEmploymentTypeLabels,
 } from '../db/indexedDB';
 import { DatabaseBackupManager } from './DatabaseBackupManager';
+import { toast } from './ToastNotification';
 
 interface SettingsPanelProps {
   currentUser: UserAccount;
@@ -65,9 +81,13 @@ interface SettingsPanelProps {
   onLeaveRulesChange: (newRules: LeaveRulesSettings) => void;
   organization?: OrganizationSettings;
   onOrganizationChange?: (newOrg: OrganizationSettings) => void;
+  employmentLabels?: EmploymentTypeLabelsSettings;
+  onEmploymentLabelsChange?: (newLabels: EmploymentTypeLabelsSettings) => void;
   onRestoreComplete?: () => void;
   onBackToDashboard?: () => void;
   onNavigate?: (tab: WorkspaceTab) => void;
+  onOpenLicense?: () => void;
+  onOpenLicenseGenerator?: () => void;
 }
 
 const INITIAL_DEFAULT_USERS: SystemUserAccount[] = [
@@ -161,11 +181,35 @@ export function SettingsPanel({
   onLeaveRulesChange,
   organization,
   onOrganizationChange,
+  employmentLabels,
+  onEmploymentLabelsChange,
   onRestoreComplete,
   onBackToDashboard,
   onNavigate,
+  onOpenLicense,
+  onOpenLicenseGenerator,
 }: SettingsPanelProps) {
-  const [activeTab, setActiveTab] = useState<'org_identity' | 'leave_rules' | 'users_rbac' | 'appearance' | 'backup_restore'>('org_identity');
+  const [activeTab, setActiveTab] = useState<
+    | 'org_identity'
+    | 'employment_labels'
+    | 'leave_rules'
+    | 'career_rules'
+    | 'users_rbac'
+    | 'system_features'
+    | 'appearance'
+    | 'backup_restore'
+    | 'commercial_license'
+  >('org_identity');
+
+  const [panelLicenseStatus, setPanelLicenseStatus] = useState<LicenseStatus | null>(null);
+  const [systemFeatures, setSystemFeatures] = useState<SystemFeatureConfig>(DEFAULT_SYSTEM_FEATURE_CONFIG);
+
+  useEffect(() => {
+    licenseService.getStatus().then(setPanelLicenseStatus);
+    const unsub = licenseService.subscribe(setPanelLicenseStatus);
+    getSystemSetting<SystemFeatureConfig>('system_features_config', DEFAULT_SYSTEM_FEATURE_CONFIG).then(setSystemFeatures);
+    return () => unsub();
+  }, []);
 
   // Master password lock for ultra-safe administrative operations (SAsa12589)
   const [isMasterUnlocked, setIsMasterUnlocked] = useState<boolean>(() => {
@@ -174,6 +218,101 @@ export function SettingsPanel({
   const [masterPasswordInput, setMasterPasswordInput] = useState('');
   const [showMasterPassword, setShowMasterPassword] = useState(false);
   const [passwordError, setPasswordError] = useState('');
+
+  // Career, Allowances, Promotion, Retirement Settings form state
+  const [careerSettingsForm, setCareerSettingsForm] = useState<CareerSystemSettings>(DEFAULT_CAREER_SETTINGS);
+  const [isSavingCareer, setIsSavingCareer] = useState(false);
+  const [careerSaveSuccess, setCareerSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    employeeService.getCareerSettings().then((cs) => {
+      setCareerSettingsForm(cs);
+    });
+  }, []);
+
+  const handleSaveCareerSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingCareer(true);
+    try {
+      await employeeService.saveCareerSettings(careerSettingsForm);
+      setCareerSaveSuccess(true);
+      toast.success('تم حفظ وتطبيق ضوابط العلاوات والترفيع والسن القانوني للتقاعد بنجاح.');
+      setTimeout(() => setCareerSaveSuccess(false), 4000);
+    } catch (err) {
+      console.error(err);
+      toast.error('فشل حفظ ضوابط العلاوات والتقاعد.');
+    } finally {
+      setIsSavingCareer(false);
+    }
+  };
+
+  // Employment Type Labels form state
+  const [labelsForm, setLabelsForm] = useState<EmploymentTypeLabelsSettings>(() => {
+    return employmentLabels || DEFAULT_EMPLOYMENT_TYPE_LABELS;
+  });
+  const [isSavingLabels, setIsSavingLabels] = useState(false);
+  const [labelsSaveSuccess, setLabelsSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    if (employmentLabels) {
+      setLabelsForm(employmentLabels);
+    }
+  }, [employmentLabels]);
+
+  const handleSaveLabels = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingLabels(true);
+    try {
+      const updated: EmploymentTypeLabelsSettings = {
+        permanent: labelsForm.permanent.trim() || DEFAULT_EMPLOYMENT_TYPE_LABELS.permanent,
+        contract: labelsForm.contract.trim() || DEFAULT_EMPLOYMENT_TYPE_LABELS.contract,
+        temporary: labelsForm.temporary?.trim() || DEFAULT_EMPLOYMENT_TYPE_LABELS.temporary || 'أجر يومي / مؤقت',
+        daily: labelsForm.daily?.trim() || DEFAULT_EMPLOYMENT_TYPE_LABELS.daily || 'أجور يومية',
+      };
+      await saveEmploymentTypeLabels(updated);
+      if (onEmploymentLabelsChange) {
+        onEmploymentLabelsChange(updated);
+      }
+      setLabelsForm(updated);
+      setLabelsSaveSuccess(true);
+      toast.success('تم حفظ وتطبيق التسميات الوظيفية المخصصة في النظام بنجاح.');
+      setTimeout(() => setLabelsSaveSuccess(false), 4000);
+    } catch (err) {
+      console.error('Failed to save employment labels:', err);
+      toast.error('حدث خطأ أثناء حفظ التسميات الوظيفية.');
+    } finally {
+      setIsSavingLabels(false);
+    }
+  };
+
+  const handleApplyPreset = (preset: { permanent: string; contract: string; temporary: string; daily: string }) => {
+    setLabelsForm({
+      permanent: preset.permanent,
+      contract: preset.contract,
+      temporary: preset.temporary,
+      daily: preset.daily,
+    });
+    toast.info('تم تطبيق النموذج المسبق، اضغط على زر الحفظ لتثبيته.');
+  };
+
+  const handleResetDefaultLabels = async () => {
+    setIsSavingLabels(true);
+    try {
+      await saveEmploymentTypeLabels(DEFAULT_EMPLOYMENT_TYPE_LABELS);
+      if (onEmploymentLabelsChange) {
+        onEmploymentLabelsChange(DEFAULT_EMPLOYMENT_TYPE_LABELS);
+      }
+      setLabelsForm(DEFAULT_EMPLOYMENT_TYPE_LABELS);
+      setLabelsSaveSuccess(true);
+      toast.success('تمت استعادة التسميات الوظيفية الافتراضية بنجاح.');
+      setTimeout(() => setLabelsSaveSuccess(false), 4000);
+    } catch (err) {
+      console.error('Failed to reset employment labels:', err);
+      toast.error('حدث خطأ أثناء استعادة التسميات الافتراضية.');
+    } finally {
+      setIsSavingLabels(false);
+    }
+  };
 
   // Organization identity form state
   const [orgForm, setOrgForm] = useState<OrganizationSettings>(() => {
@@ -197,9 +336,11 @@ export function SettingsPanel({
         onOrganizationChange(orgForm);
       }
       setOrgSaveSuccess(true);
+      toast.success('تم حفظ وتحديث بيانات وهوية المؤسسة بنجاح.');
       setTimeout(() => setOrgSaveSuccess(false), 4000);
     } catch (err) {
       console.error(err);
+      toast.error('فشل حفظ بيانات المؤسسة.');
     } finally {
       setIsSavingOrg(false);
     }
@@ -245,6 +386,7 @@ export function SettingsPanel({
       console.error(err);
     }
     setCloudEmailSuccess(true);
+    toast.success('تم تثبيت بريد النسخ الاحتياطي السحابي بنجاح.');
     setTimeout(() => setCloudEmailSuccess(false), 4000);
   };
 
@@ -266,6 +408,13 @@ export function SettingsPanel({
   const [newPermDeleteRecords, setNewPermDeleteRecords] = useState(false);
   const [newPermGenerateReports, setNewPermGenerateReports] = useState(true);
   const [newPermMasterSettings, setNewPermMasterSettings] = useState(false);
+  const [newPermUpdateSystemSettings, setNewPermUpdateSystemSettings] = useState(false);
+  const [newPermToggleFeatures, setNewPermToggleFeatures] = useState(false);
+  const [newPermGrantFiveYearLeave, setNewPermGrantFiveYearLeave] = useState(false);
+  const [newPermEditSalaries, setNewPermEditSalaries] = useState(false);
+  const [newPermManageCareerRules, setNewPermManageCareerRules] = useState(false);
+  const [newPermExportDatabase, setNewPermExportDatabase] = useState(false);
+  const [newPermManageSystemUsers, setNewPermManageSystemUsers] = useState(false);
   const [userFormError, setUserFormError] = useState('');
 
   // Load users from IndexedDB
@@ -300,9 +449,11 @@ export function SettingsPanel({
       await saveSystemSetting('leave_rules', rulesForm);
       onLeaveRulesChange(rulesForm);
       setRulesSaveSuccess(true);
+      toast.success('تم حفظ وتطبيق قواعد الإجازات والزمنيات بنجاح.');
       setTimeout(() => setRulesSaveSuccess(false), 3000);
     } catch (err) {
       console.error(err);
+      toast.error('حدث خطأ أثناء حفظ القواعد.');
     } finally {
       setIsSavingRules(false);
     }
@@ -311,6 +462,7 @@ export function SettingsPanel({
   // Reset rules to default
   const handleResetLeaveRules = () => {
     setRulesForm(DEFAULT_LEAVE_RULES);
+    toast.info('تمت استعادة معايير الإجازات الافتراضية، اضغط حفظ لتطبيقها.');
   };
 
   // Save or Add user
@@ -355,6 +507,13 @@ export function SettingsPanel({
         canDeleteRecords: newPermDeleteRecords,
         canGenerateReports: newPermGenerateReports,
         canAccessMasterSettings: newPermMasterSettings,
+        canUpdateSystemSettings: newPermUpdateSystemSettings,
+        canToggleFeatures: newPermToggleFeatures,
+        canGrantFiveYearLeave: newPermGrantFiveYearLeave,
+        canEditSalaries: newPermEditSalaries,
+        canManageCareerRules: newPermManageCareerRules,
+        canExportDatabase: newPermExportDatabase,
+        canManageSystemUsers: newPermManageSystemUsers,
       },
     };
 
@@ -362,8 +521,10 @@ export function SettingsPanel({
       await saveSystemUser(targetUser);
       if (editingUserId) {
         setUsers((prev) => prev.map((u) => (u.id === editingUserId ? targetUser : u)));
+        toast.success(`تم تحديث بيانات المستخدم (${targetUser.fullName}) بنجاح.`);
       } else {
         setUsers((prev) => [...prev, targetUser]);
+        toast.success(`تم إضافة المستخدم الجديد (${targetUser.fullName}) بنجاح.`);
       }
       setIsAddUserModalOpen(false);
       resetUserForm();
@@ -385,6 +546,13 @@ export function SettingsPanel({
     setNewPermDeleteRecords(false);
     setNewPermGenerateReports(true);
     setNewPermMasterSettings(false);
+    setNewPermUpdateSystemSettings(false);
+    setNewPermToggleFeatures(false);
+    setNewPermGrantFiveYearLeave(false);
+    setNewPermEditSalaries(false);
+    setNewPermManageCareerRules(false);
+    setNewPermExportDatabase(false);
+    setNewPermManageSystemUsers(false);
     setUserFormError('');
   };
 
@@ -396,11 +564,18 @@ export function SettingsPanel({
     setNewDepartment(u.department);
     setNewJobTitle(u.jobTitle);
     setNewRole(u.role);
-    setNewPermEditAttendance(u.permissions.canEditAttendance);
-    setNewPermApproveLeaves(u.permissions.canApproveLeaves);
-    setNewPermDeleteRecords(u.permissions.canDeleteRecords);
-    setNewPermGenerateReports(u.permissions.canGenerateReports);
-    setNewPermMasterSettings(u.permissions.canAccessMasterSettings);
+    setNewPermEditAttendance(Boolean(u.permissions.canEditAttendance));
+    setNewPermApproveLeaves(Boolean(u.permissions.canApproveLeaves));
+    setNewPermDeleteRecords(Boolean(u.permissions.canDeleteRecords));
+    setNewPermGenerateReports(Boolean(u.permissions.canGenerateReports));
+    setNewPermMasterSettings(Boolean(u.permissions.canAccessMasterSettings));
+    setNewPermUpdateSystemSettings(Boolean(u.permissions.canUpdateSystemSettings));
+    setNewPermToggleFeatures(Boolean(u.permissions.canToggleFeatures));
+    setNewPermGrantFiveYearLeave(Boolean(u.permissions.canGrantFiveYearLeave));
+    setNewPermEditSalaries(Boolean(u.permissions.canEditSalaries));
+    setNewPermManageCareerRules(Boolean(u.permissions.canManageCareerRules));
+    setNewPermExportDatabase(Boolean(u.permissions.canExportDatabase));
+    setNewPermManageSystemUsers(Boolean(u.permissions.canManageSystemUsers));
     setIsAddUserModalOpen(true);
   };
 
@@ -409,16 +584,45 @@ export function SettingsPanel({
     const updated = { ...u, isActive: !u.isActive };
     await saveSystemUser(updated);
     setUsers((prev) => prev.map((item) => (item.id === u.id ? updated : item)));
+    toast.info(`تم ${updated.isActive ? 'تفعيل' : 'تعطيل'} حساب (${u.fullName})`);
   };
 
   const handleDeleteUserClick = async (id: string, username: string) => {
     if (username === 'admin') {
-      alert('لا يمكن حذف حساب مشرف النظام المركزي الافتراضي.');
+      toast.error('لا يمكن حذف حساب مشرف النظام المركزي الافتراضي.');
       return;
     }
     if (confirm(`هل أنت متأكد من رغبتك بحذف المستخدم (${username}) نهائياً؟`)) {
       await deleteSystemUser(id);
       setUsers((prev) => prev.filter((u) => u.id !== id));
+      toast.success(`تم حذف المستخدم (${username}) بنجاح.`);
+    }
+  };
+
+  // Feature toggle helper with role and permissions validation
+  const handleToggleFeature = async (featureKey: keyof SystemFeatureConfig) => {
+    const hasPermission =
+      currentUser.role === 'super_admin' ||
+      Boolean(currentUser.permissions?.canToggleFeatures) ||
+      Boolean(currentUser.permissions?.canUpdateSystemSettings);
+
+    if (!hasPermission) {
+      toast.error('عذراً، يتطلب تعديل وتغيير ميزات النظام صلاحية (تفعيل وتعطيل الميزات) من المشرف العام.');
+      return;
+    }
+
+    const updated: SystemFeatureConfig = {
+      ...systemFeatures,
+      [featureKey]: !systemFeatures[featureKey],
+    };
+    setSystemFeatures(updated);
+    try {
+      await saveSystemSetting('system_features_config', updated);
+      toast.success(
+        `تم ${updated[featureKey] ? 'تفعيل وتشغيل' : 'إيقاف وتعطيل'} الميزة بنجاح.`
+      );
+    } catch {
+      toast.error('حدث خطأ أثناء حفظ حالة الميزة في الذاكرة المحلية.');
     }
   };
 
@@ -427,6 +631,7 @@ export function SettingsPanel({
     const updated = { ...appearance, [key]: value };
     onAppearanceChange(updated);
     await saveSystemSetting('appearance_settings', updated);
+    toast.success('تم تطبيق إعدادات المظهر والخط بنجاح.');
   };
 
   // Master password lock screen (SAsa12589)
@@ -555,6 +760,30 @@ export function SettingsPanel({
                   <Calendar className="w-3 h-3 text-amber-500" />
                   <span>التقويم والعطل</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('barcode_hub')}
+                  className="px-2.5 py-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors text-[11px] font-semibold cursor-pointer flex items-center gap-1"
+                >
+                  <QrCode className="w-3 h-3 text-indigo-500" />
+                  <span>الباركود</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('allow_promotions')}
+                  className="px-2.5 py-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors text-[11px] font-semibold cursor-pointer flex items-center gap-1"
+                >
+                  <Award className="w-3 h-3 text-amber-500" />
+                  <span>العلاوات والترفيعات</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('retirement')}
+                  className="px-2.5 py-1 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors text-[11px] font-semibold cursor-pointer flex items-center gap-1"
+                >
+                  <Briefcase className="w-3 h-3 text-purple-500" />
+                  <span>التقاعد</span>
+                </button>
               </div>
             )}
           </div>
@@ -605,6 +834,20 @@ export function SettingsPanel({
 
           <button
             type="button"
+            id="tab-employment-labels-btn"
+            onClick={() => setActiveTab('employment_labels')}
+            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              activeTab === 'employment_labels'
+                ? 'bg-white dark:bg-slate-800 text-violet-700 dark:text-violet-300 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Briefcase className="w-4 h-4 text-violet-500" />
+            <span>تخصيص المسميات الوظيفية</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('leave_rules')}
             className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
               activeTab === 'leave_rules'
@@ -618,6 +861,19 @@ export function SettingsPanel({
 
           <button
             type="button"
+            onClick={() => setActiveTab('career_rules')}
+            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              activeTab === 'career_rules'
+                ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Award className="w-4 h-4 text-amber-500" />
+            <span>العلاوات والترفيع والتقاعد</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('users_rbac')}
             className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
               activeTab === 'users_rbac'
@@ -627,6 +883,20 @@ export function SettingsPanel({
           >
             <Shield className="w-4 h-4 text-emerald-500" />
             <span>المستخدمين والصلاحيات ({users.length})</span>
+          </button>
+
+          <button
+            type="button"
+            id="tab-system-features-btn"
+            onClick={() => setActiveTab('system_features')}
+            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              activeTab === 'system_features'
+                ? 'bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Sliders className="w-4 h-4 text-indigo-500" />
+            <span>التحكم بميزات ووحدات المنظومة</span>
           </button>
 
           <button
@@ -654,6 +924,20 @@ export function SettingsPanel({
           >
             <Database className="w-4 h-4 text-indigo-500" />
             <span>النسخ الاحتياطي والأمان</span>
+          </button>
+
+          <button
+            type="button"
+            id="tab-commercial-license-btn"
+            onClick={() => setActiveTab('commercial_license')}
+            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              activeTab === 'commercial_license'
+                ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Key className="w-4 h-4 text-amber-500" />
+            <span>الترخيص التجاري ومولّد الأكواد ⚡</span>
           </button>
         </div>
       </div>
@@ -757,6 +1041,256 @@ export function SettingsPanel({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Tab 1.5: Custom Employment & Contract Type Labels */}
+      {activeTab === 'employment_labels' && (
+        <div className="space-y-6">
+          <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs space-y-6">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-700/60 pb-5">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-600 to-purple-700 flex items-center justify-center text-white shadow-md shadow-violet-600/20">
+                  <Briefcase className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>تخصيص مسميات نوع الملاك والتوظيف الحكومي</span>
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950 text-violet-800 dark:text-violet-300 font-bold border border-violet-200 dark:border-violet-800">
+                      INDEXED-DB PERSISTED
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    تعديل المسميات الرسمية لصفوف التوظيف (ملاك دائم، عقود وزارية، أجور يومية) لتنعكس فورياً في كشوفات الموظفين والتقارير وشيتات الإكسل
+                  </p>
+                </div>
+              </div>
+
+              {/* Fast Presets */}
+              <div className="flex flex-wrap items-center gap-1.5 self-start sm:self-center">
+                <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 ml-1">قوالب سريعة:</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleApplyPreset({
+                      permanent: 'ملاك دائم',
+                      contract: 'عقد وزاري (قرار 315)',
+                      temporary: 'أجر يومي / مؤقت',
+                      daily: 'أجور يومية',
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-700/60 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  الوزارات الاتحادية
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleApplyPreset({
+                      permanent: 'موظف ملاك دائم',
+                      contract: 'متعاقد وفق القرار 315',
+                      temporary: 'موظف مؤقت',
+                      daily: 'أجر يومي',
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-700/60 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  الخدمة المدنية
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleApplyPreset({
+                      permanent: 'ملاك دائم',
+                      contract: 'عقود تنمية الأقاليم',
+                      temporary: 'أجر يومي بلدي',
+                      daily: 'وقتي',
+                    })
+                  }
+                  className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-700/60 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] font-semibold transition-colors cursor-pointer"
+                >
+                  الدوائر البلدية والذاتية
+                </button>
+              </div>
+            </div>
+
+            {/* Custom Input Fields Form */}
+            <form onSubmit={handleSaveLabels} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* 1. Permanent Staff */}
+                <div className="p-4 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-amber-900 dark:text-amber-200 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                      <span>المسمى المعتمد للملاك الدائم:</span>
+                    </label>
+                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-mono font-bold">
+                      permanent
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={labelsForm.permanent}
+                    onChange={(e) => setLabelsForm({ ...labelsForm, permanent: e.target.value })}
+                    placeholder="مثال: ملاك دائم، كادر دائم، موظف ملاك دائم..."
+                    className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-amber-300 dark:border-amber-700/60 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-amber-500/30 outline-hidden"
+                    required
+                  />
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    هذا المسمى سيظهر في كشف الموظفين، بطاقة الموظف، تقارير الحركات، وخانات تصدير الإكسل.
+                  </p>
+                </div>
+
+                {/* 2. Ministerial Contract (315) */}
+                <div className="p-4 rounded-2xl bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/20 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-blue-900 dark:text-blue-200 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      <span>المسمى المعتمد للعقود الوزارية (قرار 315):</span>
+                    </label>
+                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 font-mono font-bold">
+                      contract
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={labelsForm.contract}
+                    onChange={(e) => setLabelsForm({ ...labelsForm, contract: e.target.value })}
+                    placeholder="مثال: عقد وزاري (قرار 315)، متعاقد 315، عقد تشغيلي..."
+                    className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-blue-300 dark:border-blue-700/60 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500/30 outline-hidden"
+                    required
+                  />
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    يحدد صراحة صفة موظفي العقود لتطابق الضوابط الرسمية لقرارات مجلس الوزراء العراقي.
+                  </p>
+                </div>
+
+                {/* 3. Temporary / Daily Wages */}
+                <div className="p-4 rounded-2xl bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/20 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      <span>المسمى المعتمد للأجور المؤقتة:</span>
+                    </label>
+                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-mono font-bold">
+                      temporary
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={labelsForm.temporary || ''}
+                    onChange={(e) => setLabelsForm({ ...labelsForm, temporary: e.target.value })}
+                    placeholder="مثال: أجر يومي / مؤقت، كادر مؤقت..."
+                    className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-emerald-300 dark:border-emerald-700/60 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-emerald-500/30 outline-hidden"
+                  />
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    يستخدم للملاكات المؤقتة أو عقود المشاريع الموسمية.
+                  </p>
+                </div>
+
+                {/* 4. Daily Wages */}
+                <div className="p-4 rounded-2xl bg-slate-500/5 dark:bg-slate-500/10 border border-slate-500/20 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-slate-500"></span>
+                      <span>المسمى المعتمد للأجور اليومية:</span>
+                    </label>
+                    <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono font-bold">
+                      daily
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    value={labelsForm.daily || ''}
+                    onChange={(e) => setLabelsForm({ ...labelsForm, daily: e.target.value })}
+                    placeholder="مثال: أجور يومية، عمال أجور يومية..."
+                    className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700/60 bg-white dark:bg-slate-900 text-slate-900 dark:text-white focus:ring-2 focus:ring-slate-500/30 outline-hidden"
+                  />
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    يستخدم لعمال الخدمة والصيانة بنظام الأجر اليومي المستمر.
+                  </p>
+                </div>
+              </div>
+
+              {/* Live Interactive Preview */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-violet-500" />
+                    <span>معاينة حية ومباشرة لكيفية ظهور المسميات في كشوفات وتقارير النظام:</span>
+                  </span>
+                  <span className="text-[11px] font-mono text-slate-400">Live Preview</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                    <div className="text-[11px] text-slate-500">شارة الملاك الدائم:</div>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                      <span>{labelsForm.permanent || DEFAULT_EMPLOYMENT_TYPE_LABELS.permanent}</span>
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                    <div className="text-[11px] text-slate-500">شارة العقود الوزارية:</div>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-blue-50 dark:bg-blue-950/50 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                      <span>{labelsForm.contract || DEFAULT_EMPLOYMENT_TYPE_LABELS.contract}</span>
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 space-y-1.5">
+                    <div className="text-[11px] text-slate-500">شارة الأجور المؤقتة:</div>
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                      <span>{labelsForm.temporary || DEFAULT_EMPLOYMENT_TYPE_LABELS.temporary}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons & Feedback */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleResetDefaultLabels}
+                    disabled={isSavingLabels}
+                    className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>استعادة المسميات الافتراضية</span>
+                  </button>
+
+                  {labelsSaveSuccess && (
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>تم حفظ المسميات بنجاح في IndexedDB وتحديث المنظومة فورياً!</span>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSavingLabels}
+                  className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-md shadow-violet-600/20 transition-all cursor-pointer"
+                >
+                  {isSavingLabels ? (
+                    <>
+                      <Sparkles className="w-4 h-4 animate-spin" />
+                      <span>جارٍ الحفظ في IndexedDB...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>حفظ المسميات وتطبيقها على كافة الكشوفات</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -1090,6 +1624,210 @@ export function SettingsPanel({
       </div>
       )}
 
+      {/* Tab: Career, Allowances, Promotion & Retirement Rules */}
+      {activeTab === 'career_rules' && (
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-700">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Award className="w-5 h-5 text-amber-500" />
+                <span>ضوابط استحقاق العلاوات السنوية، الترفيعات الوظيفية والتقاعد القانوني</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                تحديد معايير الحساب الآلي لمدد الاستحقاق، سنوات الخدمة في كل درجة وظيفية، والسن القانوني للإحالة على التقاعد وفق القوانين العراقية
+              </p>
+            </div>
+            <span className="px-3 py-1 rounded-xl text-xs font-mono font-bold bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-800 self-start sm:self-center">
+              قانون الخدمة والتقاعد 2026
+            </span>
+          </div>
+
+          <form onSubmit={handleSaveCareerSettings} className="space-y-6">
+            {/* Section 1: Annual Allowance & Retirement Age Settings */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Allowance Cycle */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 space-y-2">
+                <label className="text-xs font-bold text-slate-900 dark:text-white block">
+                  دورة استحقاق العلاوة السنوية (بالأشهر):
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={careerSettingsForm.allowanceIntervalMonths}
+                    onChange={(e) =>
+                      setCareerSettingsForm({
+                        ...careerSettingsForm,
+                        allowanceIntervalMonths: Math.max(1, parseInt(e.target.value) || 12),
+                      })
+                    }
+                    className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    required
+                  />
+                  <span className="absolute left-3 top-2 text-xs text-slate-400">شهراً (افتراضياً 12)</span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  المدة المحتسبة تلقائياً بين تاريخ آخر علاوة وتاريخ استحقاق العلاوة القادمة.
+                </p>
+              </div>
+
+              {/* Statutory Retirement Age */}
+              <div className="p-4 rounded-2xl bg-purple-500/5 dark:bg-purple-500/10 border border-purple-500/20 space-y-2">
+                <label className="text-xs font-bold text-purple-900 dark:text-purple-200 block">
+                  السن القانوني للإحالة على التقاعد (بالسنوات):
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="45"
+                    max="75"
+                    value={careerSettingsForm.retirementAgeYears}
+                    onChange={(e) =>
+                      setCareerSettingsForm({
+                        ...careerSettingsForm,
+                        retirementAgeYears: Math.max(45, parseInt(e.target.value) || 60),
+                      })
+                    }
+                    className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-purple-300 dark:border-purple-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    required
+                  />
+                  <span className="absolute left-3 top-2 text-xs text-purple-600 dark:text-purple-300">سنة (افتراضياً 60)</span>
+                </div>
+                <p className="text-[11px] text-purple-700 dark:text-purple-300">
+                  السن النظامي لإحالة الموظف تلقائياً على التقاعد (قانون التقاعد الموحد العراقي رقم 9 لسنة 2014 المعدل).
+                </p>
+              </div>
+
+              {/* Pre-Retirement Warning Advance Period */}
+              <div className="p-4 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 space-y-2">
+                <label className="text-xs font-bold text-amber-900 dark:text-amber-200 block">
+                  مدة التنبيه المسبق قبل بلوغ سن التقاعد:
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    max="24"
+                    value={careerSettingsForm.retirementWarningMonths}
+                    onChange={(e) =>
+                      setCareerSettingsForm({
+                        ...careerSettingsForm,
+                        retirementWarningMonths: Math.max(1, parseInt(e.target.value) || 6),
+                      })
+                    }
+                    className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-amber-300 dark:border-amber-800 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    required
+                  />
+                  <span className="absolute left-3 top-2 text-xs text-amber-600 dark:text-amber-300">أشهر (افتراضياً 6)</span>
+                </div>
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  فترة إظهار شارة التنبيه في مركز الإشعارات ولوحة التحكم لإعداد ملف الإحالة والخدمة التقاعدية.
+                </p>
+              </div>
+            </div>
+
+            {/* Section 2: Promotion Criteria (Years in Grade) */}
+            <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Briefcase className="w-4 h-4 text-amber-500" />
+                    <span>جدول مدد الإقامة الصغرى المشروطة للترفيع لكل درجة وظيفية</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    عدد سنوات الخدمة المقضية في الدرجة الحالية للترقية إلى الدرجة الأعلى التالية
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((grade) => {
+                  const req = careerSettingsForm.promotionRequirementsPerGrade[grade] || { minYears: 4 };
+                  return (
+                    <div
+                      key={grade}
+                      className="p-3 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-900 dark:text-white">
+                          الدرجة {grade}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {grade === 1 ? 'الدرجة العليا' : `إلى الدرجة ${grade - 1}`}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="1"
+                          max="15"
+                          value={req.minYears}
+                          onChange={(e) => {
+                            const val = Math.max(1, parseInt(e.target.value) || 4);
+                            setCareerSettingsForm({
+                              ...careerSettingsForm,
+                              promotionRequirementsPerGrade: {
+                                ...careerSettingsForm.promotionRequirementsPerGrade,
+                                [grade]: {
+                                  ...req,
+                                  minYears: val,
+                                },
+                              },
+                            });
+                          }}
+                          className="w-full px-2 py-1 text-xs font-bold rounded-lg border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white font-mono text-center"
+                        />
+                        <span className="text-[11px] text-slate-500 shrink-0">سنوات</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-between pt-2">
+              {careerSaveSuccess && (
+                <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>تم حفظ وتحديث ضوابط الاستحقاق والتقاعد بنجاح!</span>
+                </div>
+              )}
+              <div className="mr-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCareerSettingsForm(DEFAULT_CAREER_SETTINGS);
+                    toast.info('تمت استعادة القيم القانونية المعيارية الافتراضية.');
+                  }}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold cursor-pointer"
+                >
+                  استعادة الافتراضي
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCareer}
+                  className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center gap-2 shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+                >
+                  {isSavingCareer ? (
+                    <>
+                      <Sparkles className="w-4 h-4 animate-spin" />
+                      <span>جارٍ الحفظ...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      <span>حفظ القواعد وتطبيقها في كل الوحدات</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Tab 2: Users & RBAC */}
       {activeTab === 'users_rbac' && (
         <div className="space-y-6">
@@ -1214,6 +1952,51 @@ export function SettingsPanel({
                       </span>
                       <span
                         className={`px-2 py-0.5 rounded-lg font-semibold ${
+                          u.permissions.canGrantFiveYearLeave
+                            ? 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-400 line-through'
+                        }`}
+                      >
+                        إجازة 5 سنوات
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-lg font-semibold ${
+                          u.permissions.canUpdateSystemSettings
+                            ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-400 line-through'
+                        }`}
+                      >
+                        تحديث النظام
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-lg font-semibold ${
+                          u.permissions.canToggleFeatures
+                            ? 'bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-400 line-through'
+                        }`}
+                      >
+                        ميزات المنظومة
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-lg font-semibold ${
+                          u.permissions.canEditSalaries
+                            ? 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-400 line-through'
+                        }`}
+                      >
+                        تعديل الرواتب
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-lg font-semibold ${
+                          u.permissions.canManageCareerRules
+                            ? 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-400 line-through'
+                        }`}
+                      >
+                        العلاوات والتقاعد
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-lg font-semibold ${
                           u.permissions.canDeleteRecords
                             ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
                             : 'bg-slate-200 dark:bg-slate-700 text-slate-400 line-through'
@@ -1239,6 +2022,15 @@ export function SettingsPanel({
                       >
                         الإعدادات المركزية
                       </span>
+                      <span
+                        className={`px-2 py-0.5 rounded-lg font-semibold ${
+                          u.permissions.canManageSystemUsers
+                            ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                            : 'bg-slate-200 dark:bg-slate-700 text-slate-400 line-through'
+                        }`}
+                      >
+                        إدارة المستخدمين
+                      </span>
                     </div>
                   </div>
 
@@ -1261,6 +2053,634 @@ export function SettingsPanel({
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: System Features Configuration (صلاحيات وميزات وتحديثات النظام) */}
+      {activeTab === 'system_features' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="p-6 rounded-3xl bg-gradient-to-br from-indigo-950 via-slate-900 to-slate-950 text-white border border-indigo-900/60 shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    إدارة ميزات النظام المركزية
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    مصفوفة التحكم الفوري (Live Toggles)
+                  </span>
+                </div>
+                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                  <Sliders className="w-5 h-5 text-indigo-400" />
+                  <span>التحكم بميزات ووحدات المنظومة وصلاحيات التحديث</span>
+                </h2>
+                <p className="text-xs text-slate-300 mt-1 max-w-2xl leading-relaxed">
+                  تتيح هذه اللوحة للإدارة المركزية تفعيل أو إيقاف أي وحدة أو ميزة في النظام فوراً، كإجازة الـ 5 سنوات، منظومة التقاعد، الباركود، والعلاوات. التغييرات تُحفظ فورياً وتُطبّق على سائر وحدات العمل.
+                </p>
+              </div>
+
+              {/* Quick Actions */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (
+                      currentUser.role !== 'super_admin' &&
+                      !currentUser.permissions?.canToggleFeatures &&
+                      !currentUser.permissions?.canUpdateSystemSettings
+                    ) {
+                      toast.error('عذراً، يتطلب تعديل ميزات النظام صلاحية المشرف العام.');
+                      return;
+                    }
+                    const allEnabled: SystemFeatureConfig = {
+                      enableFiveYearLeave: true,
+                      enableRetirementHub: true,
+                      enableBarcodeHub: true,
+                      enableAllowancesPromotions: true,
+                      enableAnalyticsHub: true,
+                      enableSalariesCalculation: true,
+                      enableAutoBackup: true,
+                      enableMovementDesigner: true,
+                    };
+                    setSystemFeatures(allEnabled);
+                    await saveSystemSetting('system_features_config', allEnabled);
+                    toast.success('تم تفعيل كافة ميزات ووحدات المنظومة بنجاح.');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>تفعيل الكل</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (
+                      currentUser.role !== 'super_admin' &&
+                      !currentUser.permissions?.canToggleFeatures &&
+                      !currentUser.permissions?.canUpdateSystemSettings
+                    ) {
+                      toast.error('عذراً، يتطلب تعديل ميزات النظام صلاحية المشرف العام.');
+                      return;
+                    }
+                    setSystemFeatures(DEFAULT_SYSTEM_FEATURE_CONFIG);
+                    await saveSystemSetting('system_features_config', DEFAULT_SYSTEM_FEATURE_CONFIG);
+                    toast.info('تمت استعادة التهيئة الافتراضية للميزات.');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/20 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>استعادة الافتراضي</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Permission Alert Indicator */}
+            {currentUser.role !== 'super_admin' &&
+              !currentUser.permissions?.canToggleFeatures &&
+              !currentUser.permissions?.canUpdateSystemSettings && (
+                <div className="mt-4 p-3 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-xs flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+                  <span>
+                    تنبيه: أنت تتصفح هذه اللوحة بوضع العرض فقط. يتطلب تعديل أو تبديل حالة الميزات حساب مشرف النظام (Super Admin) أو منحك صلاحية (تفعيل وتعطيل الميزات) في مصفوفة الصلاحيات.
+                  </span>
+                </div>
+              )}
+          </div>
+
+          {/* Features Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 1. Five Year Leave Feature */}
+            <div
+              className={`p-5 rounded-3xl border transition-all ${
+                systemFeatures.enableFiveYearLeave
+                  ? 'bg-white dark:bg-slate-800 border-purple-300 dark:border-purple-800 shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-70'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                      systemFeatures.enableFiveYearLeave
+                        ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                    }`}
+                  >
+                    <Briefcase className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>إجازة الـ 5 سنوات (براتب اسمي كامل)</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300">
+                        مادة الخدمة المدنية
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      قانون الخدمة المدنية رقم 24 وقوانين الموازنة الاتحادية
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="toggle-five-year-leave-feature"
+                  onClick={() => handleToggleFeature('enableFiveYearLeave')}
+                  className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                    systemFeatures.enableFiveYearLeave ? 'bg-purple-600' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                  title={systemFeatures.enableFiveYearLeave ? 'تعطيل الميزة' : 'تفعيل الميزة'}
+                >
+                  <span
+                    className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                      systemFeatures.enableFiveYearLeave ? '-translate-x-6' : '-translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
+                تفعيل تبويب إجازة الخمس سنوات في الحركات اليومية، واحتساب التوقيفات التقاعدية (10%)، ومنح الموظف إجازة 5 سنوات براتب اسمي كامل، وإصدار الأمر الإداري وقرار المباشرة أو قطع الإجازة.
+              </p>
+
+              <div className="flex items-center justify-between text-[11px] pt-3 border-t border-slate-100 dark:border-slate-700/60 font-medium">
+                <span className="text-slate-400">حالة الميزة في التطبيق:</span>
+                <span
+                  className={`font-bold ${
+                    systemFeatures.enableFiveYearLeave
+                      ? 'text-purple-600 dark:text-purple-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {systemFeatures.enableFiveYearLeave ? '✓ مفعّلة ومتاحة في الحركات' : '✗ معطلة مؤقتاً'}
+                </span>
+              </div>
+            </div>
+
+            {/* 2. Retirement Hub Feature */}
+            <div
+              className={`p-5 rounded-3xl border transition-all ${
+                systemFeatures.enableRetirementHub
+                  ? 'bg-white dark:bg-slate-800 border-indigo-300 dark:border-indigo-800 shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-70'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                      systemFeatures.enableRetirementHub
+                        ? 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                    }`}
+                  >
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>هيئة وشؤون التقاعد (السن القانوني 60)</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
+                        التقاعد الموحد 9
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      قانون التقاعد الموحد رقم 9 لسنة 2014 المعدل
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="toggle-retirement-hub-feature"
+                  onClick={() => handleToggleFeature('enableRetirementHub')}
+                  className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                    systemFeatures.enableRetirementHub ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                      systemFeatures.enableRetirementHub ? '-translate-x-6' : '-translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
+                حساب بلوغ الموظفين لسن الستين (60 سنة) بدقة من تاريخ الميلاد، التنبيهات المبكرة قبل 6 أشهر، إحالة الموظف بضغطة زر وتوليد استمارة الانفكاك والتقاعد الرسمية.
+              </p>
+
+              <div className="flex items-center justify-between text-[11px] pt-3 border-t border-slate-100 dark:border-slate-700/60 font-medium">
+                <span className="text-slate-400">حالة الميزة في التطبيق:</span>
+                <span
+                  className={`font-bold ${
+                    systemFeatures.enableRetirementHub
+                      ? 'text-indigo-600 dark:text-indigo-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {systemFeatures.enableRetirementHub ? '✓ مفعّلة ونشطة' : '✗ معطلة مؤقتاً'}
+                </span>
+              </div>
+            </div>
+
+            {/* 3. Barcode & Badges Feature */}
+            <div
+              className={`p-5 rounded-3xl border transition-all ${
+                systemFeatures.enableBarcodeHub
+                  ? 'bg-white dark:bg-slate-800 border-amber-300 dark:border-amber-800 shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-70'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                      systemFeatures.enableBarcodeHub
+                        ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-700 dark:text-amber-300'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                    }`}
+                  >
+                    <QrCode className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>الباركود والبطاقات الذكية (Barcode & QR)</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300">
+                        قارئ USB + هويات
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      مسح الحضور المباشر وطباعة بطاقات الهوية الرسمية
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="toggle-barcode-hub-feature"
+                  onClick={() => handleToggleFeature('enableBarcodeHub')}
+                  className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                    systemFeatures.enableBarcodeHub ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                      systemFeatures.enableBarcodeHub ? '-translate-x-6' : '-translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
+                تسجيل الحضور والانصراف بمسح الباركود، والتحقق الفوري من هوية الموظف، وتوليد وتصدير بطاقات الهوية الصدرية (Badges) مع شعار الدائرة الرسمي.
+              </p>
+
+              <div className="flex items-center justify-between text-[11px] pt-3 border-t border-slate-100 dark:border-slate-700/60 font-medium">
+                <span className="text-slate-400">حالة الميزة في التطبيق:</span>
+                <span
+                  className={`font-bold ${
+                    systemFeatures.enableBarcodeHub
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {systemFeatures.enableBarcodeHub ? '✓ مفعّلة ونشطة' : '✗ معطلة مؤقتاً'}
+                </span>
+              </div>
+            </div>
+
+            {/* 4. Allowances & Promotions Feature */}
+            <div
+              className={`p-5 rounded-3xl border transition-all ${
+                systemFeatures.enableAllowancesPromotions
+                  ? 'bg-white dark:bg-slate-800 border-orange-300 dark:border-orange-800 shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-70'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                      systemFeatures.enableAllowancesPromotions
+                        ? 'bg-orange-100 dark:bg-orange-950/70 text-orange-700 dark:text-orange-300'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                    }`}
+                  >
+                    <Award className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>العلاوات والترفيعات الوظيفية الآلية</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-300">
+                        قانون الرواتب 22
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      قانون رواتب موظفي الدولة والقطاع العام رقم 22 لسنة 2008
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="toggle-allowances-promotions-feature"
+                  onClick={() => handleToggleFeature('enableAllowancesPromotions')}
+                  className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                    systemFeatures.enableAllowancesPromotions ? 'bg-orange-500' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                      systemFeatures.enableAllowancesPromotions ? '-translate-x-6' : '-translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
+                احتساب استحقاق العلاوات الشهرية، ترفيع الدرجات من العاشرة إلى الأولى بحسب مدد الخدمة المقررة، وإصدار أوامر الترفيع والعلاوة الإدارية الموحدة.
+              </p>
+
+              <div className="flex items-center justify-between text-[11px] pt-3 border-t border-slate-100 dark:border-slate-700/60 font-medium">
+                <span className="text-slate-400">حالة الميزة في التطبيق:</span>
+                <span
+                  className={`font-bold ${
+                    systemFeatures.enableAllowancesPromotions
+                      ? 'text-orange-600 dark:text-orange-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {systemFeatures.enableAllowancesPromotions ? '✓ مفعّلة ونشطة' : '✗ معطلة مؤقتاً'}
+                </span>
+              </div>
+            </div>
+
+            {/* 5. Analytics Hub Feature */}
+            <div
+              className={`p-5 rounded-3xl border transition-all ${
+                systemFeatures.enableAnalyticsHub
+                  ? 'bg-white dark:bg-slate-800 border-cyan-300 dark:border-cyan-800 shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-70'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                      systemFeatures.enableAnalyticsHub
+                        ? 'bg-cyan-100 dark:bg-cyan-950/70 text-cyan-700 dark:text-cyan-300'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                    }`}
+                  >
+                    <Sparkles className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>الرسوم البيانية التفاعلية ومؤشرات الأداء</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300">
+                        Recharts تفاعلي
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      مخططات توزيع الكوادر، نسب الدوام والغياب، والإحصاء الحي
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="toggle-analytics-hub-feature"
+                  onClick={() => handleToggleFeature('enableAnalyticsHub')}
+                  className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                    systemFeatures.enableAnalyticsHub ? 'bg-cyan-600' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                      systemFeatures.enableAnalyticsHub ? '-translate-x-6' : '-translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
+                لوحة إحصائية مرئية لتحليل نسب الحضور والغياب، مقارنة الأقسام، واستعراض نسب الموظفين الحاصلين على إجازة 5 سنوات أو إجازات اعتيادية.
+              </p>
+
+              <div className="flex items-center justify-between text-[11px] pt-3 border-t border-slate-100 dark:border-slate-700/60 font-medium">
+                <span className="text-slate-400">حالة الميزة في التطبيق:</span>
+                <span
+                  className={`font-bold ${
+                    systemFeatures.enableAnalyticsHub
+                      ? 'text-cyan-600 dark:text-cyan-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {systemFeatures.enableAnalyticsHub ? '✓ مفعّلة ونشطة' : '✗ معطلة مؤقتاً'}
+                </span>
+              </div>
+            </div>
+
+            {/* 6. Salaries Calculation Feature */}
+            <div
+              className={`p-5 rounded-3xl border transition-all ${
+                systemFeatures.enableSalariesCalculation
+                  ? 'bg-white dark:bg-slate-800 border-emerald-300 dark:border-emerald-800 shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-70'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                      systemFeatures.enableSalariesCalculation
+                        ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                    }`}
+                  >
+                    <Zap className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>الحسابات الذكية لسلم الرواتب والمخصصات</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                        دينار عراقي IQD
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      احتساب الراتب الاسمي والشهادة والزوجية واستقطاع التقاعد 10%
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="toggle-salaries-calculation-feature"
+                  onClick={() => handleToggleFeature('enableSalariesCalculation')}
+                  className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                    systemFeatures.enableSalariesCalculation ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                      systemFeatures.enableSalariesCalculation ? '-translate-x-6' : '-translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
+                الاحتساب الآلي لمرتبات الموظفين والمخصصات الحكومية والخصومات الرسمية لفاقدي الرصيد ومجازي الخمس سنوات.
+              </p>
+
+              <div className="flex items-center justify-between text-[11px] pt-3 border-t border-slate-100 dark:border-slate-700/60 font-medium">
+                <span className="text-slate-400">حالة الميزة في التطبيق:</span>
+                <span
+                  className={`font-bold ${
+                    systemFeatures.enableSalariesCalculation
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {systemFeatures.enableSalariesCalculation ? '✓ مفعّلة ونشطة' : '✗ معطلة مؤقتاً'}
+                </span>
+              </div>
+            </div>
+
+            {/* 7. Auto Backup Feature */}
+            <div
+              className={`p-5 rounded-3xl border transition-all ${
+                systemFeatures.enableAutoBackup
+                  ? 'bg-white dark:bg-slate-800 border-blue-300 dark:border-blue-800 shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-70'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                      systemFeatures.enableAutoBackup
+                        ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                    }`}
+                  >
+                    <Database className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>النسخ الاحتياطي التلقائي والأرشفة الشاملة</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                        IndexedDB محلي
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      تأمين قاعدة البيانات محلياً وتصدير ملفات JSON المشفرة
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="toggle-auto-backup-feature"
+                  onClick={() => handleToggleFeature('enableAutoBackup')}
+                  className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                    systemFeatures.enableAutoBackup ? 'bg-blue-600' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                      systemFeatures.enableAutoBackup ? '-translate-x-6' : '-translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
+                حفظ نسخ أمان تلقائية لبيانات الموظفين وسجلات الحركات والغياب لضمان عدم فقدان أي معلومة حتى عند إغلاق المتصفح.
+              </p>
+
+              <div className="flex items-center justify-between text-[11px] pt-3 border-t border-slate-100 dark:border-slate-700/60 font-medium">
+                <span className="text-slate-400">حالة الميزة في التطبيق:</span>
+                <span
+                  className={`font-bold ${
+                    systemFeatures.enableAutoBackup
+                      ? 'text-blue-600 dark:text-blue-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {systemFeatures.enableAutoBackup ? '✓ مفعّلة ونشطة' : '✗ معطلة مؤقتاً'}
+                </span>
+              </div>
+            </div>
+
+            {/* 8. Movement Designer Feature */}
+            <div
+              className={`p-5 rounded-3xl border transition-all ${
+                systemFeatures.enableMovementDesigner
+                  ? 'bg-white dark:bg-slate-800 border-teal-300 dark:border-teal-800 shadow-sm'
+                  : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 opacity-70'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                      systemFeatures.enableMovementDesigner
+                        ? 'bg-teal-100 dark:bg-teal-950/70 text-teal-700 dark:text-teal-300'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-500'
+                    }`}
+                  >
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>مصمم استمارات الحركات والأوامر الإدارية</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 dark:bg-teal-950 text-teal-700 dark:text-teal-300">
+                        طباعة A4 رسمية
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      توليد استمارات الإجازات والأوامر الوزارية المعتمدة
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  id="toggle-movement-designer-feature"
+                  onClick={() => handleToggleFeature('enableMovementDesigner')}
+                  className={`w-12 h-6.5 rounded-full transition-colors relative cursor-pointer shrink-0 ${
+                    systemFeatures.enableMovementDesigner ? 'bg-teal-600' : 'bg-slate-300 dark:bg-slate-600'
+                  }`}
+                >
+                  <span
+                    className={`block w-5 h-5 rounded-full bg-white shadow-md transform transition-transform ${
+                      systemFeatures.enableMovementDesigner ? '-translate-x-6' : '-translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed mb-3">
+                تخصيص وطباعة نماذج الإجازات الرسمية واستمارات التكليف بمهمة أو الانفكاك وتوليد الكتب الإدارية الجاهزة للطباعة.
+              </p>
+
+              <div className="flex items-center justify-between text-[11px] pt-3 border-t border-slate-100 dark:border-slate-700/60 font-medium">
+                <span className="text-slate-400">حالة الميزة في التطبيق:</span>
+                <span
+                  className={`font-bold ${
+                    systemFeatures.enableMovementDesigner
+                      ? 'text-teal-600 dark:text-teal-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {systemFeatures.enableMovementDesigner ? '✓ مفعّلة ونشطة' : '✗ معطلة مؤقتاً'}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1536,6 +2956,148 @@ export function SettingsPanel({
         />
       )}
 
+      {/* Tab 5: Commercial License & Seller Hub */}
+      {activeTab === 'commercial_license' && (
+        <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-700">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Key className="w-5 h-5 text-amber-500" />
+                <span>الترخيص التجاري، الأيام التجريبية، ومولّد أكواد البيع للمطور</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                إدارة تراخيص المنظومة للبيع للدوائر والمؤسسات، توليد السيريالات المشفرة، وتحديد الأيام التجريبية
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {onOpenLicense && (
+                <button
+                  type="button"
+                  onClick={onOpenLicense}
+                  className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                  <span>نافذة التفعيل</span>
+                </button>
+              )}
+              {onOpenLicenseGenerator && (
+                <button
+                  type="button"
+                  onClick={onOpenLicenseGenerator}
+                  className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-950 dark:bg-slate-700 dark:hover:bg-slate-600 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors"
+                >
+                  <Key className="w-4 h-4 text-amber-400" />
+                  <span>مولّد أكواد البيع (المالك)</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 1. Current License Status Card */}
+          <div
+            className={`p-5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+              panelLicenseStatus?.isLifetime
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                : panelLicenseStatus?.isTrial
+                ? panelLicenseStatus.isExpired
+                  ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+                  : 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200'
+                : 'bg-blue-50 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-900 dark:text-blue-200'
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                  panelLicenseStatus?.isLifetime
+                    ? 'bg-emerald-500/20 text-emerald-600'
+                    : panelLicenseStatus?.isTrial
+                    ? panelLicenseStatus.isExpired
+                      ? 'bg-rose-500/20 text-rose-600'
+                      : 'bg-amber-500/20 text-amber-600'
+                    : 'bg-blue-500/20 text-blue-600'
+                }`}
+              >
+                {panelLicenseStatus?.isLifetime ? (
+                  <Sparkles className="w-6 h-6" />
+                ) : (
+                  <ShieldCheck className="w-6 h-6" />
+                )}
+              </div>
+              <div>
+                <div className="text-xs font-semibold opacity-75">حالة ترخيص النسخة الحالية:</div>
+                <div className="text-base font-black">
+                  {panelLicenseStatus?.isLifetime
+                    ? 'مرخص رسمي دائم مدى الحياة (Lifetime License)'
+                    : panelLicenseStatus?.isTrial
+                    ? panelLicenseStatus.isExpired
+                      ? 'انتهت الفترة التجريبية (مطلوب كود تفعيل للبيع)'
+                      : `فترة تجريبية مجانية (متبقي ${panelLicenseStatus.trialDaysRemaining} يوماً من أصل ${panelLicenseStatus.trialDaysTotal} يوم)`
+                    : `اشتراك سنوي ساري المفعول (متبقي ${panelLicenseStatus?.daysRemaining} يوماً)`}
+                </div>
+                <div className="text-[11px] opacity-80 mt-0.5">
+                  معرّف الجهاز (Machine ID): <span className="font-mono font-bold">{panelLicenseStatus?.deviceId}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {onOpenLicense && (
+                <button
+                  type="button"
+                  onClick={onOpenLicense}
+                  className="px-4 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold shadow-xs hover:bg-slate-50 cursor-pointer"
+                >
+                  إدخال كود التفعيل
+                </button>
+              )}
+              {onOpenLicenseGenerator && (
+                <button
+                  type="button"
+                  onClick={onOpenLicenseGenerator}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-sm cursor-pointer"
+                >
+                  فتح مولّد المفاتيح ⚡
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* 2. Commercial Features Overview */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
+              <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 font-bold text-xs">
+                <Clock className="w-4 h-4" />
+                <span>1. الأيام التجريبية القابلة للتخصيص</span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                يمكن للمطور تحديد مدة التجربة الافتراضية (مثلاً 7، 15، 30، 60 يوماً). يبدأ العد التنازلي من أول يوم تشغيل، وعند الانتهاء يقفل النظام شاشته تلقائياً ويطلب كود التفعيل دون فقدان أي بيانات.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
+              <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-bold text-xs">
+                <Key className="w-4 h-4" />
+                <span>2. أكواد التفعيل المشفرة للبيع</span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                توليد سيريالات مشفرة بنمط <code className="font-mono text-[10px] bg-slate-200 dark:bg-slate-800 px-1 py-0.5 rounded">MANHAJ-PLAN-DEV-SEED-SIG</code> تحتوي على بصمة رقمية تمنع التخمين أو التزوير، وتعمل بالكامل 100% بدون إنترنت (Offline).
+              </p>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 space-y-2">
+              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold text-xs">
+                <ShieldCheck className="w-4 h-4" />
+                <span>3. تقييد الجهاز وحماية الملكية</span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+                إمكانية ربط كود البيع بحاسوب الزبون فقط عبر معرّف الجهاز (Machine ID)، مما يمنع الزبون من نسخ البرنامج واستخدامه على حواسيب أخرى دون شراء تراخيص إضافية.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add / Edit User Modal */}
       {isAddUserModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
@@ -1685,9 +3247,65 @@ export function SettingsPanel({
                 <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
                   <input
                     type="checkbox"
+                    checked={newPermGrantFiveYearLeave}
+                    onChange={(e) => setNewPermGrantFiveYearLeave(e.target.checked)}
+                    className="rounded text-purple-600"
+                  />
+                  <span className="font-bold text-purple-700 dark:text-purple-300">
+                    صلاحية منح وإقرار وتعديل إجازة الخمس (5) سنوات براتب اسمي
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newPermUpdateSystemSettings}
+                    onChange={(e) => setNewPermUpdateSystemSettings(e.target.checked)}
+                    className="rounded text-indigo-600"
+                  />
+                  <span className="font-bold text-indigo-700 dark:text-indigo-300">
+                    صلاحية تحديث وتغيير إعدادات المنظومة وهوية الوزارة والمؤسسة
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newPermToggleFeatures}
+                    onChange={(e) => setNewPermToggleFeatures(e.target.checked)}
+                    className="rounded text-indigo-600"
+                  />
+                  <span className="font-bold text-indigo-700 dark:text-indigo-300">
+                    صلاحية تفعيل وتعطيل ميزات ووحدات النظام (Feature Flags & Modules)
+                  </span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newPermEditSalaries}
+                    onChange={(e) => setNewPermEditSalaries(e.target.checked)}
+                    className="rounded text-amber-500"
+                  />
+                  <span>صلاحية تعديل سلم الرواتب والمخصصات والاستقطاعات</span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newPermManageCareerRules}
+                    onChange={(e) => setNewPermManageCareerRules(e.target.checked)}
+                    className="rounded text-amber-500"
+                  />
+                  <span>صلاحية إقرار العلاوات السنوية والترفيع والتقاعد القانوني</span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
                     checked={newPermDeleteRecords}
                     onChange={(e) => setNewPermDeleteRecords(e.target.checked)}
-                    className="rounded text-amber-500"
+                    className="rounded text-rose-500"
                   />
                   <span>صلاحية حذف وتعديل سجلات الموظفين الحساسة</span>
                 </label>
@@ -1700,6 +3318,26 @@ export function SettingsPanel({
                     className="rounded text-amber-500"
                   />
                   <span>صلاحية استخراج وتصدير وطباعة التقارير الرسمية</span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newPermExportDatabase}
+                    onChange={(e) => setNewPermExportDatabase(e.target.checked)}
+                    className="rounded text-indigo-500"
+                  />
+                  <span>صلاحية تصدير ونسخ قاعدة البيانات ومزامنتها</span>
+                </label>
+
+                <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newPermManageSystemUsers}
+                    onChange={(e) => setNewPermManageSystemUsers(e.target.checked)}
+                    className="rounded text-emerald-500"
+                  />
+                  <span>صلاحية إدارة المستخدمين وتعديل الصلاحيات</span>
                 </label>
 
                 <label className="flex items-center gap-2.5 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">

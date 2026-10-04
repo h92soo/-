@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>المنهج الرقمي للإدارة الحكومية | مركز تشغيل تطبيق سطح المكتب</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(22, 30, 46, 0.85);
+      --border: rgba(255, 255, 255, 0.1);
+      --gold: #f59e0b;
+      --gold-dark: #d97706;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #10b981;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    body {
+      background: radial-gradient(circle at 50% 10%, #1e293b, var(--bg));
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      direction: rtl;
+    }
+    .container {
+      max-width: 820px;
+      width: 100%;
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      padding: 40px 32px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.6);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .top-glow {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #f59e0b, #10b981, #3b82f6, #f59e0b);
+    }
+    .emblem {
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(16, 185, 129, 0.15));
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 24px;
+    }
+    .emblem svg {
+      width: 48px;
+      height: 48px;
+      fill: none;
+      stroke: #f59e0b;
+      stroke-width: 1.8;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 999px;
+      color: #fbbf24;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    h1 {
+      font-size: 26px;
+      font-weight: 800;
+      margin-bottom: 8px;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+    p.subtitle {
+      font-size: 15px;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+      line-height: 1.6;
+    }
+    .notice-card {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      padding: 16px 20px;
+      text-align: right;
+      margin-bottom: 28px;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #cbd5e1;
+    }
+    .notice-card strong {
+      color: #fbbf24;
+    }
+    .actions-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+      margin-bottom: 30px;
+    }
+    @media (min-width: 640px) {
+      .actions-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 16px 22px;
+      border-radius: 16px;
+      font-size: 14px;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #ffffff;
+      box-shadow: 0 8px 24px -4px rgba(245, 158, 11, 0.4);
+    }
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #fbbf24, #b45309);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 28px -4px rgba(245, 158, 11, 0.5);
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.06);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.12);
+      transform: translateY(-2px);
+    }
+    .steps-container {
+      text-align: right;
+      background: rgba(15, 23, 42, 0.5);
+      border-radius: 20px;
+      padding: 22px;
+      border: 1px solid var(--border);
+    }
+    .step-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f1f5f9;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .step-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+    .step-num {
+      width: 24px;
+      height: 24px;
+      background: #f59e0b;
+      color: #000;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 12px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .step-item strong {
+      color: #f8fafc;
+    }
+    .footer-text {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="top-glow"></div>
+
+    <div class="emblem">
+      <svg viewBox="0 0 24 24">
+        <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/>
+        <path d="M12 6v12M8 10l4-4 4 4"/>
+      </svg>
+    </div>
+
+    <div class="badge">
+      <span>●</span>
+      <span>الجمهورية العراقية - المنظومة الإدارية الموحدة</span>
+    </div>
+
+    <h1>المنهج الرقمي للإدارة الحكومية</h1>
+    <p class="subtitle">
+      نظام إدارة شؤون الموظفين والحضور والغياب (إصدار حواسيب سطح المكتب 2026)<br>
+      تصميم وتطوير: المهندس حسين عبد المنذر
+    </p>
+
+    <div class="notice-card">
+      <strong>لماذا تظهر شاشة بيضاء عند فتح ملفات الويب مباشرة؟</strong><br>
+      المتصفحات الحديثة (Chrome و Edge) تمنع تشغيل تطبيقات الويب الحديثة المعقدة مباشرة عبر النقر المزدوج على ملفات HTML بسبب بروتوكول الأمان (file://).<br>
+      <strong>الحل التلقائي:</strong> تم تزويد هذه الحزمة بمشغل سطح مكتب تنفيذي مباشر ينشئ أيقونة رسمية على شاشة حاسوبك ويطلق المنظومة كنافذة مستقلة بدون متصفح.
+    </div>
+
+    <div class="actions-grid">
+      <button onclick="launchApp()" class="btn btn-primary">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        <span>تشغيل المنظومة كنافذة سطح مكتب فوراً</span>
+      </button>
+
+      <button onclick="downloadBat()" class="btn btn-secondary">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span>تنزيل ملف المشغل (تشغيل_التطبيق.bat)</span>
+      </button>
+    </div>
+
+    <div class="steps-container">
+      <div class="step-title">
+        <span>خطوات التثبيت والتشغيل الدائم على جهازك:</span>
+      </div>
+
+      <div class="step-item">
+        <div class="step-num">1</div>
+        <div>
+          <strong>التشغيل السريع من المجلد:</strong> ابحث داخل هذا المجلد عن ملف اسمه <code>تشغيل_تطبيق_سطح_المكتب.bat</code> وانقر عليه نقراً مزدوجاً. سيقوم بإنشاء اختصار رسمي على سطح المكتب وتشغيل التطبيق فوراً.
+        </div>
+      </div>
+
+      <div class="step-item">
+        <div class="step-num">2</div>
+        <div>
+          <strong>التثبيت كتطبيق دائم (PWA Standalone):</strong> عند فتح التطبيق، انقر على زر (تثبيت التطبيق) أو علامة (+) في شريط المتصفح العلوي. سيصبح التطبيق برنامجاً مستقلاً تماماً على جهازك في قائمة Start وسطح المكتب.
+        </div>
+      </div>
+
+      <div class="step-item">
+        <div class="step-num">3</div>
+        <div>
+          <strong>حفظ البيانات محلياً (100% Offline):</strong> جميع بيانات الموظفين والحركات وسجلات الحضور تُحفظ محلياً داخل قاعدة بيانات المتصفح بجهازك (IndexedDB) وتستمر بالعمل حتى بدون إنترنت.
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-text">
+      المنهج الرقمي للإدارة الحكومية © 2026 — كافة الحقوق محفوظة
+    </div>
+  </div>
+
+  <script>
+    const APP_URL = "https://ais-dev-4geoa3rrxp3yn3ckysjhkj-615803937025.europe-west2.run.app";
+
+    function launchApp() {
+      // فتح التطبيق كنافذة سطح مكتب مستقلة
+      window.open(APP_URL, 'GovernmentHRSystem', 'width=1440,height=900,menubar=no,toolbar=no,location=no,status=no,resizable=yes');
+    }
+
+    function downloadBat() {
+      const batContent = `@echo off
+chcp 65001 > nul
+title المنهج الرقمي للإدارة الحكومية - تشغيل تطبيق سطح المكتب
+color 0b
+
+echo ===============================================================================
+echo            الجمهورية العراقية - المنظومة الإدارية الموحدة
+echo            المنهج الرقمي للإدارة الحكومية - إصدار حواسيب سطح المكتب 2026
+echo ===============================================================================
+echo.
+echo  [1/2] جاري إنشاء اختصار رسمي على سطح مكتب حاسوبك...
+
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $desktop = [System.Environment]::GetFolderPath('Desktop'); $s = $ws.CreateShortcut([System.IO.Path]::Combine($desktop, 'المنهج الرقمي للإدارة الحكومية.lnk')); $s.TargetPath = 'msedge.exe'; $s.Arguments = '--app=${APP_URL} --window-size=1400,900'; $s.Description = 'المنهج الرقمي للإدارة الحكومية'; $s.Save()" > nul 2>&1
+
+echo  [+] تم إنشاء اختصار سطح المكتب بنجاح!
+echo.
+echo  [2/2] جاري إطلاق التطبيق كنافذة سطح مكتب مستقلة...
+
+start msedge.exe --app="${APP_URL}" --window-size=1400,900
+if %ERRORLEVEL% NEQ 0 (
+    start chrome.exe --app="${APP_URL}" --window-size=1400,900
+)
+if %ERRORLEVEL% NEQ 0 (
+    start "" "${APP_URL}"
+)
+
+echo  [✓] يعمل التطبيق الآن! يمكنك إغلاق هذه النافذة بأمان.
+timeout /t 3 > nul
+exit
+`;
+      const blob = new Blob([batContent], { type: 'application/x-bat;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'تشغيل_تطبيق_سطح_المكتب.bat';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  </script>
+</body>
+</html>

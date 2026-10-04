@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X,
   Download,
@@ -11,26 +12,32 @@ import {
   CheckCircle2,
   Calendar,
   Sparkles,
+  Eye,
 } from 'lucide-react';
 import {
   ReportExportOptions,
   exportMovementsToExcel,
+  exportComprehensiveExcel,
   triggerOfficialPrint,
   generateReportFilename,
   OFFICIAL_DESIGNER_CREDIT,
 } from '../utils/reportExportUtils';
-import { AttendanceRecord } from '../types';
+import { AttendanceRecord, Employee, EmploymentTypeLabelsSettings } from '../types';
+import { getAllEmployees } from '../db/indexedDB';
+import { PdfReportPreviewModal } from './PdfReportPreviewModal';
 
 export interface ReportExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   records: AttendanceRecord[];
+  employees?: Employee[];
   reportScope: 'daily' | 'weekly' | 'monthly' | 'custom';
   selectedDate: string;
   selectedMonth: string;
   startDate?: string;
   endDate?: string;
   departmentName: string;
+  employmentLabels?: EmploymentTypeLabelsSettings;
   stats?: {
     total: number;
     present: number;
@@ -47,12 +54,14 @@ export const ReportExportModal: React.FC<ReportExportModalProps> = ({
   isOpen,
   onClose,
   records,
+  employees,
   reportScope: initialScope,
   selectedDate: initialDate,
   selectedMonth: initialMonth,
   startDate: initialStart,
   endDate: initialEnd,
   departmentName,
+  employmentLabels,
   stats,
 }) => {
   const [activeScope, setActiveScope] = useState<'daily' | 'weekly' | 'monthly' | 'custom'>(initialScope || 'daily');
@@ -61,12 +70,13 @@ export const ReportExportModal: React.FC<ReportExportModalProps> = ({
   const [scopeStartDate, setScopeStartDate] = useState(initialStart || initialDate || '2026-09-01');
   const [scopeEndDate, setScopeEndDate] = useState(initialEnd || initialDate || '2026-09-30');
 
-  const [exportFormat, setExportFormat] = useState<'xlsx' | 'pdf'>('xlsx');
+  const [exportFormat, setExportFormat] = useState<'comprehensive_xlsx' | 'xlsx' | 'pdf'>('comprehensive_xlsx');
   const [includeSignatures, setIncludeSignatures] = useState(true);
   const [includeStatsSummary, setIncludeStatsSummary] = useState(true);
   const [includeAttribution, setIncludeAttribution] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [exportSuccessNotice, setExportSuccessNotice] = useState<string | null>(null);
+  const [isPdfPreviewOpen, setIsPdfPreviewOpen] = useState(false);
 
   // Filter records based on selected export scope in the modal
   const exportFilteredRecords = React.useMemo(() => {
@@ -131,20 +141,31 @@ export const ReportExportModal: React.FC<ReportExportModalProps> = ({
     startDate: scopeStartDate,
     endDate: scopeEndDate,
     departmentName,
+    employmentLabels,
     stats: exportStats,
     includeSignatures,
     includeStatsSummary,
     includeAttribution,
   };
 
-  const filenamePreview = generateReportFilename(exportOptions, exportFormat);
+  const filenamePreview =
+    exportFormat === 'comprehensive_xlsx'
+      ? `المصنف_الشامل_الموظفين_والحركات_${(exportOptions.departmentName || 'كافة_الأقسام').replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.xlsx`
+      : generateReportFilename(exportOptions, exportFormat === 'pdf' ? 'pdf' : 'xlsx');
 
-  const handleExecuteExport = () => {
+  const handleExecuteExport = async () => {
     setIsProcessing(true);
     setExportSuccessNotice(null);
 
     try {
-      if (exportFormat === 'xlsx') {
+      if (exportFormat === 'comprehensive_xlsx') {
+        let emps = employees;
+        if (!emps || emps.length === 0) {
+          emps = await getAllEmployees();
+        }
+        const savedFile = exportComprehensiveExcel(emps, exportFilteredRecords, exportOptions);
+        setExportSuccessNotice(`تم تصدير مصنف Excel الشامل (سجلات الموظفين + الحركات + الإحصائيات) بنجاح: ${savedFile}`);
+      } else if (exportFormat === 'xlsx') {
         const savedFile = exportMovementsToExcel(exportFilteredRecords, exportOptions);
         setExportSuccessNotice(`تم تصدير ملف الإكسل بنجاح: ${savedFile}`);
       } else {
@@ -159,11 +180,21 @@ export const ReportExportModal: React.FC<ReportExportModalProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs no-print">
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150 no-print"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isProcessing) {
+          onClose();
+        }
+      }}
+    >
       <div
         id="report-export-modal"
-        className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+        className="w-full max-w-lg bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 my-auto"
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="p-5 bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -323,42 +354,81 @@ export const ReportExportModal: React.FC<ReportExportModalProps> = ({
           {/* Export Format Selector (Excel vs PDF) */}
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-2">
-              تنسيق التصدير المطلوب:
+              تنسيق ونوع التصدير المطلوب:
             </label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {/* Option 1: Comprehensive Excel (.xlsx) */}
               <button
                 type="button"
-                onClick={() => setExportFormat('xlsx')}
-                className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
-                  exportFormat === 'xlsx'
-                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200 font-bold shadow-xs'
+                id="export-format-comprehensive-btn"
+                onClick={() => setExportFormat('comprehensive_xlsx')}
+                className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex flex-col gap-2 ${
+                  exportFormat === 'comprehensive_xlsx'
+                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200 font-bold ring-2 ring-emerald-500/20 shadow-xs'
                     : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400'
                 }`}
               >
-                <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
-                  <FileSpreadsheet className="w-5 h-5" />
+                <div className="flex items-center justify-between w-full">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                    <FileSpreadsheet className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-bold">
+                    موصى به
+                  </span>
                 </div>
                 <div>
-                  <div className="text-xs font-bold">مصنف إكسل (.xlsx)</div>
-                  <div className="text-[10px] text-slate-400">جداول مهيأة وترويسة وزارية</div>
+                  <div className="text-xs font-bold">المصنف الشامل (.xlsx)</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">سجلات الموظفين + الحركات + المؤشرات</div>
                 </div>
               </button>
 
+              {/* Option 2: Movements Excel (.xlsx) */}
               <button
                 type="button"
-                onClick={() => setExportFormat('pdf')}
-                className={`p-3.5 rounded-2xl border text-right transition-all cursor-pointer flex items-center gap-3 ${
-                  exportFormat === 'pdf'
-                    ? 'border-amber-500 bg-amber-500/10 text-amber-900 dark:text-amber-200 font-bold shadow-xs'
+                id="export-format-movements-xlsx-btn"
+                onClick={() => setExportFormat('xlsx')}
+                className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex flex-col gap-2 ${
+                  exportFormat === 'xlsx'
+                    ? 'border-emerald-500 bg-emerald-500/10 text-emerald-900 dark:text-emerald-200 font-bold ring-2 ring-emerald-500/20 shadow-xs'
                     : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400'
                 }`}
               >
-                <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center shrink-0">
-                  <Printer className="w-5 h-5" />
+                <div className="flex items-center justify-between w-full">
+                  <div className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center shrink-0">
+                    <FileSpreadsheet className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-teal-100 dark:bg-teal-950 text-teal-800 dark:text-teal-300 font-bold">
+                    حركات فقط
+                  </span>
                 </div>
                 <div>
-                  <div className="text-xs font-bold">طباعة وحفظ A4 PDF</div>
-                  <div className="text-[10px] text-slate-400">وثيقة رسمية بالأختام والتواقيع</div>
+                  <div className="text-xs font-bold">كشف الحركات (.xlsx)</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">جدول الحركات والإجازات المحددة</div>
+                </div>
+              </button>
+
+              {/* Option 3: Official Printable A4 PDF */}
+              <button
+                type="button"
+                id="export-format-pdf-btn"
+                onClick={() => setExportFormat('pdf')}
+                className={`p-3 rounded-2xl border text-right transition-all cursor-pointer flex flex-col gap-2 ${
+                  exportFormat === 'pdf'
+                    ? 'border-amber-500 bg-amber-500/10 text-amber-900 dark:text-amber-200 font-bold ring-2 ring-amber-500/20 shadow-xs'
+                    : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                <div className="flex items-center justify-between w-full">
+                  <div className="w-8 h-8 rounded-xl bg-amber-600 text-white flex items-center justify-center shrink-0">
+                    <Printer className="w-4 h-4" />
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold">
+                    رسمي A4
+                  </span>
+                </div>
+                <div>
+                  <div className="text-xs font-bold">طباعة وحفظ PDF</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5 leading-snug">وثيقة رسمية بالأختام والتواقيع</div>
                 </div>
               </button>
             </div>
@@ -416,7 +486,7 @@ export const ReportExportModal: React.FC<ReportExportModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="p-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex items-center justify-end gap-2">
+        <div className="p-4 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
           <button
             type="button"
             onClick={onClose}
@@ -425,21 +495,68 @@ export const ReportExportModal: React.FC<ReportExportModalProps> = ({
             إلغاء
           </button>
 
-          <button
-            type="button"
-            onClick={handleExecuteExport}
-            disabled={isProcessing}
-            className={`px-5 py-2 rounded-xl text-white text-xs font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer ${
-              exportFormat === 'xlsx'
-                ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
-                : 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
-            }`}
-          >
-            {exportFormat === 'xlsx' ? <Download className="w-4 h-4" /> : <Printer className="w-4 h-4" />}
-            <span>{exportFormat === 'xlsx' ? 'تصدير كملف Excel (.xlsx)' : 'بدء الطباعة الرسمية / PDF'}</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {exportFormat === 'pdf' && (
+              <button
+                type="button"
+                id="modal-pdf-preview-trigger-btn"
+                onClick={() => setIsPdfPreviewOpen(true)}
+                className="px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+                title="فتح نافذة المعاينة التفاعلية لشكل وثيقة الـ PDF قبل الحفظ"
+              >
+                <Eye className="w-4 h-4 text-amber-500" />
+                <span>معاينة وثيقة PDF</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              id="execute-report-export-btn"
+              onClick={handleExecuteExport}
+              disabled={isProcessing}
+              className={`px-5 py-2 rounded-xl text-white text-xs font-bold flex items-center gap-2 shadow-md transition-all cursor-pointer ${
+                exportFormat === 'pdf'
+                  ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+                  : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+              }`}
+            >
+              {exportFormat === 'pdf' ? <Printer className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+              <span>
+                {isProcessing
+                  ? 'جاري إعداد الملف...'
+                  : exportFormat === 'comprehensive_xlsx'
+                  ? 'تصدير المصنف الشامل Excel (.xlsx)'
+                  : exportFormat === 'xlsx'
+                  ? 'تصدير كشف الحركات Excel (.xlsx)'
+                  : 'بدء الطباعة الرسمية / PDF'}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      {/* Interactive PDF Preview Modal */}
+      {isPdfPreviewOpen && (
+        <PdfReportPreviewModal
+          isOpen={isPdfPreviewOpen}
+          onClose={() => setIsPdfPreviewOpen(false)}
+          reportType="movements"
+          title={exportOptions.reportTitle}
+          departmentName={departmentName}
+          selectedDate={scopeDate}
+          selectedMonth={scopeMonth}
+          startDate={scopeStartDate}
+          endDate={scopeEndDate}
+          reportScope={activeScope}
+          records={exportFilteredRecords}
+          stats={exportStats}
+          employmentLabels={employmentLabels}
+          includeSignatures={includeSignatures}
+          includeStatsSummary={includeStatsSummary}
+          includeAttribution={includeAttribution}
+        />
+      )}
+    </div>,
+    document.body
   );
 };

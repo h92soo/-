@@ -28,6 +28,11 @@ import {
   Home,
   Users,
   BarChart3,
+  Briefcase,
+  DollarSign,
+  Percent,
+  ShieldCheck,
+  Award,
 } from 'lucide-react';
 import {
   Employee,
@@ -46,11 +51,18 @@ import {
 } from '../db/indexedDB';
 import { getArabicDayOfWeek } from '../utils/reportExportUtils';
 import { ReportExportModal } from './ReportExportModal';
+import { getContractTypeLabel } from '../utils/contractTypeUtils';
+import { EmploymentTypeLabelsSettings } from '../types';
+import { showToast, toast } from './ToastNotification';
+import { employeeService } from '../services/employeeService';
+import { GovernmentEmblem } from './GovernmentEmblem';
 
 interface DailyMovementsHubProps {
   employees: Employee[];
   leaveRules: LeaveRulesSettings;
   organization?: OrganizationSettings;
+  employmentLabels?: EmploymentTypeLabelsSettings;
+  initialSubTab?: 'registration' | 'five_year_leaves' | 'reports';
   onEmployeesChanged?: (updated: Employee[]) => void;
   onBackToDashboard?: () => void;
   onNavigate?: (tab: WorkspaceTab) => void;
@@ -63,12 +75,38 @@ export function DailyMovementsHub({
   employees,
   leaveRules,
   organization,
+  employmentLabels,
+  initialSubTab,
   onEmployeesChanged,
   onBackToDashboard,
   onNavigate,
 }: DailyMovementsHubProps) {
-  // Navigation sub-tab: 'registration' (تسجيل الحركات الفورية) or 'reports' (محرك التقارير المتقدم)
-  const [activeTab, setActiveTab] = useState<'registration' | 'reports'>('registration');
+  // Navigation sub-tab: 'registration' (تسجيل الحركات الفورية) or 'five_year_leaves' (منح وإدارة إجازة الـ 5 سنوات) or 'reports' (محرك التقارير المتقدم)
+  const [activeTab, setActiveTab] = useState<'registration' | 'five_year_leaves' | 'reports'>(
+    initialSubTab || 'registration'
+  );
+
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  // 5-Year Leave Management States
+  const [selectedEmpIdForFiveYear, setSelectedEmpIdForFiveYear] = useState<string>('');
+  const [fiveYearSalaryType, setFiveYearSalaryType] = useState<'full_base_salary' | 'half_base_salary'>('full_base_salary');
+  const [fiveYearStartDate, setFiveYearStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [fiveYearEndDate, setFiveYearEndDate] = useState<string>(() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 5);
+    return d.toISOString().slice(0, 10);
+  });
+  const [fiveYearOrderNumber, setFiveYearOrderNumber] = useState<string>(() => `إج5-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`);
+  const [fiveYearOrderDate, setFiveYearOrderDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [fiveYearPensionPercent, setFiveYearPensionPercent] = useState<number>(10);
+  const [fiveYearNotes, setFiveYearNotes] = useState<string>('منح إجازة لمدة خمس (5) سنوات براتب اسمي استناداً لأحكام قانون الخدمة المدنية رقم 24 لسنة 1960 وقانون الموازنة الاتحادية');
+  const [isGrantingFiveYear, setIsGrantingFiveYear] = useState<boolean>(false);
+  const [printingOrderEmployee, setPrintingOrderEmployee] = useState<Employee | null>(null);
 
   // Selected date for daily actions
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -135,7 +173,7 @@ export function DailyMovementsHub({
 
   useEffect(() => {
     loadRecords();
-  }, [employees]);
+  }, []);
 
   // Departments list
   const departments = useMemo(() => {
@@ -183,6 +221,25 @@ export function DailyMovementsHub({
     });
   }, [employees, contractFilter, departmentFilter, searchTerm, movementFilter, currentDayRecordsMap]);
 
+  // Pagination for Daily Movements Hub (20 per page by default)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(20);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, departmentFilter, contractFilter, movementFilter, selectedDate]);
+
+  const totalItems = filteredEmployeesForDay.length;
+  const effectivePageSize = pageSize === 0 ? totalItems : pageSize;
+  const totalPages = Math.max(1, Math.ceil(totalItems / (effectivePageSize || 1)));
+  const safeCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+
+  const paginatedEmployeesForDay = useMemo(() => {
+    if (pageSize === 0) return filteredEmployeesForDay;
+    const startIndex = (safeCurrentPage - 1) * pageSize;
+    return filteredEmployeesForDay.slice(startIndex, startIndex + pageSize);
+  }, [filteredEmployeesForDay, safeCurrentPage, pageSize]);
+
   // Current day statistics
   const dayStats = useMemo(() => {
     let present = 0;
@@ -228,6 +285,199 @@ export function DailyMovementsHub({
       totalMovements: absent + regularLeave + sickLeave + mission + time1hr + time2hr,
     };
   }, [employees, currentDayRecordsMap]);
+
+  // Active 5-Year Leave Employees
+  const fiveYearEmployees = useMemo(() => {
+    return employees.filter(
+      (e) => e.status === 'five_year_leave' || (e.fiveYearLeave && e.fiveYearLeave.isActive)
+    );
+  }, [employees]);
+
+  // Financial and Operational Metrics for 5-Year Leaves
+  const fiveYearMetrics = useMemo(() => {
+    let totalBase = 0;
+    let totalPensionDeduction = 0;
+    let totalNetPaid = 0;
+
+    fiveYearEmployees.forEach((emp) => {
+      const base = emp.fiveYearLeave?.baseSalaryAtLeave || emp.baseSalary || 500000;
+      const isHalf = emp.fiveYearLeave?.salaryType === 'half_base_salary';
+      const monthlyAmount = isHalf ? Math.round(base / 2) : base;
+      const pensionPct = (emp.fiveYearLeave?.pensionDeductionPercent || 10) / 100;
+      const pension = Math.round(base * pensionPct);
+      const net = Math.max(0, monthlyAmount - pension);
+
+      totalBase += base;
+      totalPensionDeduction += pension;
+      totalNetPaid += net;
+    });
+
+    return {
+      count: fiveYearEmployees.length,
+      totalBase,
+      totalPensionDeduction,
+      totalNetPaid,
+    };
+  }, [fiveYearEmployees]);
+
+  // Grant 5-Year Official Leave Handler
+  const handleGrantFiveYearLeave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEmpIdForFiveYear) {
+      toast.warning('يرجى اختيار الموظف أولاً لمنح إجازة الـ 5 سنوات');
+      return;
+    }
+
+    const emp = employees.find((x) => x.id === selectedEmpIdForFiveYear);
+    if (!emp) return;
+
+    setIsGrantingFiveYear(true);
+    try {
+      const baseSalary = emp.baseSalary || 500000;
+      const monthlyPaidAmount =
+        fiveYearSalaryType === 'full_base_salary' ? baseSalary : Math.round(baseSalary / 2);
+      const monthlyPensionDeduction = Math.round(baseSalary * (fiveYearPensionPercent / 100));
+      const netMonthlyPaid = Math.max(0, monthlyPaidAmount - monthlyPensionDeduction);
+
+      const fiveYearConfig = {
+        isActive: true,
+        salaryType: fiveYearSalaryType,
+        startDate: fiveYearStartDate,
+        endDate: fiveYearEndDate,
+        orderNumber: fiveYearOrderNumber.trim(),
+        orderDate: fiveYearOrderDate,
+        baseSalaryAtLeave: baseSalary,
+        monthlyPaidAmount,
+        pensionDeductionPercent: fiveYearPensionPercent,
+        monthlyPensionDeduction,
+        netMonthlyPaid,
+        notes: fiveYearNotes.trim(),
+      };
+
+      const updatedEmp: Employee = {
+        ...emp,
+        status: 'five_year_leave',
+        fiveYearLeave: fiveYearConfig,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // 1. Save updated employee
+      await saveEmployee(updatedEmp);
+      await employeeService.updateEmployee(updatedEmp);
+
+      // 2. Add to career timeline
+      await employeeService.addTimelineEvent({
+        id: `EVT-5YR-${emp.id}-${Date.now()}`,
+        employeeId: emp.id,
+        date: fiveYearStartDate,
+        title: `منح إجازة 5 سنوات (${
+          fiveYearSalaryType === 'full_base_salary' ? 'براتب اسمي كامل' : 'بنصف راتب اسمي'
+        })`,
+        category: 'five_year_leave',
+        description: `تم منح الموظف إجازة خمس (5) سنوات رسمية براتب اسمي بموجب الأمر الإداري ذي العدد (${fiveYearOrderNumber}) الصادر بتاريخ (${fiveYearOrderDate}) واستقطاع توقيفات تقاعدية بنسبة ${fiveYearPensionPercent}%.`,
+        orderNumber: fiveYearOrderNumber,
+        orderDate: fiveYearOrderDate,
+        performedBy: 'مسؤول الموارد البشرية',
+        createdAt: new Date().toISOString(),
+      });
+
+      // 3. Log attendance movement for the start date
+      const attendanceLog: AttendanceRecord = {
+        id: `LOG-5YR-${emp.id}-${Date.now().toString().slice(-4)}`,
+        employeeId: emp.id,
+        employeeName: emp.fullName,
+        employeeNumber: emp.employeeNumber,
+        department: emp.department,
+        contractType: emp.contractType,
+        date: fiveYearStartDate,
+        endDate: fiveYearEndDate,
+        status: 'leave',
+        category: 'leave',
+        leaveType: fiveYearSalaryType === 'full_base_salary' ? 'five_year_full' : 'five_year_half',
+        movementTitle: `إجازة خمس سنوات (${
+          fiveYearSalaryType === 'full_base_salary' ? 'اسمي كامل' : 'نصف اسمي'
+        })`,
+        movementType: 'إجازة 5 سنوات',
+        durationDays: 1826,
+        orderNumber: fiveYearOrderNumber,
+        orderDate: fiveYearOrderDate,
+        notes: fiveYearNotes,
+        recordedBy: 'قسم الحركات والإجازات',
+        createdAt: new Date().toISOString(),
+      };
+      await saveAttendanceLogsBatch([attendanceLog]);
+      setRecords((prev) => [attendanceLog, ...prev]);
+
+      // 4. Update parent
+      const updatedList = employees.map((x) => (x.id === updatedEmp.id ? updatedEmp : x));
+      if (onEmployeesChanged) {
+        onEmployeesChanged(updatedList);
+      }
+
+      toast.success(
+        `تم منح إجازة الـ 5 سنوات للموظف (${emp.fullName}) وإصدار الأمر الإداري (${fiveYearOrderNumber}) بنجاح!`
+      );
+
+      // Reset form
+      setSelectedEmpIdForFiveYear('');
+      setFiveYearOrderNumber(`إج5-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`);
+    } catch (err) {
+      console.error('Failed to grant 5-year leave:', err);
+      toast.error('حدث خطأ أثناء حفظ إجازة الـ 5 سنوات');
+    } finally {
+      setIsGrantingFiveYear(false);
+    }
+  };
+
+  // Interrupt 5-Year Leave (قطع الإجازة والمباشرة)
+  const handleInterruptFiveYearLeave = async (emp: Employee) => {
+    if (
+      !confirm(
+        `هل أنت متأكد من قطع إجازة الـ 5 سنوات للموظف (${emp.fullName}) وتثبيت المباشرة بالدوام الرسمي؟`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const updatedEmp: Employee = {
+        ...emp,
+        status: 'active',
+        fiveYearLeave: emp.fiveYearLeave
+          ? {
+              ...emp.fiveYearLeave,
+              isActive: false,
+              notes: (emp.fiveYearLeave.notes || '') + ' [تم قطع الإجازة والمباشرة بالدوام]',
+            }
+          : undefined,
+        updatedAt: new Date().toISOString(),
+      };
+
+      await saveEmployee(updatedEmp);
+      await employeeService.updateEmployee(updatedEmp);
+
+      await employeeService.addTimelineEvent({
+        id: `EVT-RETURN-${emp.id}-${Date.now()}`,
+        employeeId: emp.id,
+        date: new Date().toISOString().slice(0, 10),
+        title: 'قطع إجازة الـ 5 سنوات ومباشرة بالدوام',
+        category: 'department_change',
+        description: `انفك الموظف من إجازة الـ 5 سنوات وباشر بمهامه الوظيفية الاعتيادية.`,
+        performedBy: 'مسؤول الموارد البشرية',
+        createdAt: new Date().toISOString(),
+      });
+
+      const updatedList = employees.map((x) => (x.id === updatedEmp.id ? updatedEmp : x));
+      if (onEmployeesChanged) {
+        onEmployeesChanged(updatedList);
+      }
+
+      toast.success(`تم قطع إجازة الـ 5 سنوات وتثبيت مباشرة (${emp.fullName}) بالدوام`);
+    } catch (err) {
+      console.error('Failed to interrupt leave:', err);
+      toast.error('حدث خطأ أثناء قطع الإجازة');
+    }
+  };
 
   // 1-Click Fast Movement Handler
   const handleRegisterMovement = async (
@@ -327,8 +577,18 @@ export function DailyMovementsHub({
       if (onEmployeesChanged) onEmployeesChanged(updatedEmployees);
     }
 
-    await loadRecords();
-    showFeedback(`تم تثبيت [${movementTitle}] للموظف (${emp.fullName}) بنجاح.`);
+    // In-place records state update for instantaneous response without blocking DB load
+    setRecords((prev) => {
+      const idx = prev.findIndex((r) => r.id === recId || (r.employeeId === emp.id && r.date === selectedDate));
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = updatedRecord;
+        return copy;
+      }
+      return [...prev, updatedRecord];
+    });
+
+    toast.success(`تم تثبيت [${movementTitle}] للموظف (${emp.fullName}) بنجاح.`);
   };
 
   // Delete movement and restore to present
@@ -336,23 +596,22 @@ export function DailyMovementsHub({
     const existingRec = currentDayRecordsMap.get(emp.id);
     if (!existingRec) return;
 
-    if (confirm(`هل أنت متأكد من إلغاء الحركة المسجلة للموظف (${emp.fullName}) وإعادته كـ حاضر؟`)) {
-      await deleteAttendanceRecord(existingRec.id);
+    await deleteAttendanceRecord(existingRec.id);
 
-      // Refund leave balance if it was annual leave
-      if (existingRec.status === 'leave' && existingRec.leaveType === 'annual') {
-        const newUsed = Math.max(0, emp.usedBalance - 1);
-        const newRemaining = Math.min(emp.annualBalanceLimit, emp.remainingBalance + 1);
-        const updatedEmp: Employee = { ...emp, usedBalance: newUsed, remainingBalance: newRemaining };
-        await saveEmployee(updatedEmp);
-        if (onEmployeesChanged) {
-          onEmployeesChanged(employees.map((e) => (e.id === emp.id ? updatedEmp : e)));
-        }
+    // Refund leave balance if it was annual leave
+    if (existingRec.status === 'leave' && existingRec.leaveType === 'annual') {
+      const newUsed = Math.max(0, emp.usedBalance - 1);
+      const newRemaining = Math.min(emp.annualBalanceLimit, emp.remainingBalance + 1);
+      const updatedEmp: Employee = { ...emp, usedBalance: newUsed, remainingBalance: newRemaining };
+      await saveEmployee(updatedEmp);
+      if (onEmployeesChanged) {
+        onEmployeesChanged(employees.map((e) => (e.id === emp.id ? updatedEmp : e)));
       }
-
-      await loadRecords();
-      showFeedback(`تم إلغاء الحركة للموظف (${emp.fullName}) وإعادته كـ حاضر.`);
     }
+
+    // In-place remove from records state
+    setRecords((prev) => prev.filter((r) => r.id !== existingRec.id));
+    toast.success(`تم إلغاء الحركة للموظف (${emp.fullName}) وإعادته كـ حاضر.`);
   };
 
   // Save custom edit
@@ -369,9 +628,9 @@ export function DailyMovementsHub({
     };
 
     await saveAttendanceLogsBatch([updated]);
-    await loadRecords();
+    setRecords((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
     setEditingRecord(null);
-    showFeedback('تم حفظ تفاصيل وتعديلات الحركة بنجاح.');
+    toast.success('تم حفظ تفاصيل وتعديلات الحركة بنجاح.');
   };
 
   // =========================================================================
@@ -570,6 +829,25 @@ export function DailyMovementsHub({
           >
             <Clock className="w-4 h-4 text-indigo-500" />
             <span>تسجيل الحركات الفورية</span>
+          </button>
+
+          <button
+            type="button"
+            id="tab-five-year-leaves-btn"
+            onClick={() => setActiveTab('five_year_leaves')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'five_year_leaves'
+                ? 'bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 shadow-xs'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Briefcase className="w-4 h-4 text-purple-500" />
+            <span>إجازة الـ 5 سنوات (براتب اسمي)</span>
+            {fiveYearEmployees.length > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-mono font-bold">
+                {fiveYearEmployees.length}
+              </span>
+            )}
           </button>
 
           <button
@@ -784,7 +1062,7 @@ export function DailyMovementsHub({
                       : 'text-slate-500'
                   }`}
                 >
-                  ملاك دائم
+                  {getContractTypeLabel('permanent', employmentLabels)}
                 </button>
                 <button
                   type="button"
@@ -795,7 +1073,7 @@ export function DailyMovementsHub({
                       : 'text-slate-500'
                   }`}
                 >
-                  عقد وزاري (315)
+                  {getContractTypeLabel('contract', employmentLabels)}
                 </button>
               </div>
 
@@ -839,9 +1117,10 @@ export function DailyMovementsHub({
                       </td>
                     </tr>
                   ) : (
-                    filteredEmployeesForDay.map((emp, index) => {
+                    paginatedEmployeesForDay.map((emp, index) => {
                       const record = currentDayRecordsMap.get(emp.id);
                       const currentStatus = record ? record.status : 'present';
+                      const rowSequence = (pageSize === 0 ? 0 : (safeCurrentPage - 1) * pageSize) + index + 1;
 
                       // Status Badge details
                       let badgeText = 'حاضر (دوام رسمي)';
@@ -874,7 +1153,7 @@ export function DailyMovementsHub({
                         >
                           {/* 1. Sequence Number (ت) */}
                           <td className="p-3.5 text-center font-mono font-bold text-slate-500">
-                            {index + 1}
+                            {rowSequence}
                           </td>
 
                           {/* 2. Full Name (الاسم الكامل للموظف) */}
@@ -892,16 +1171,21 @@ export function DailyMovementsHub({
                             )}
                           </td>
 
-                          {/* 3. Job Status / Contract (الصفة الوظيفية: ملاك دائم أو عقد وزاري) */}
+                          {/* 3. Job Status / Contract */}
                           <td className="p-3.5 text-center">
-                            {emp.contractType === 'permanent' ? (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                                ملاك دائم
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
-                                عقد وزاري (قرار 315)
-                              </span>
+                            <span
+                              className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                emp.contractType === 'permanent'
+                                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-800'
+                                  : 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-300 dark:border-blue-800'
+                              }`}
+                            >
+                              {getContractTypeLabel(emp.contractType, employmentLabels)}
+                            </span>
+                            {emp.status === 'five_year_leave' && (
+                              <div className="text-[10px] font-bold text-purple-700 dark:text-purple-300 mt-1">
+                                مجاز 5 سنوات (اسمي)
+                              </div>
                             )}
                           </td>
 
@@ -1056,12 +1340,677 @@ export function DailyMovementsHub({
               </table>
             </div>
           </div>
+
+          {/* Pagination Controls Bar */}
+          {filteredEmployeesForDay.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs text-xs mt-3 no-print">
+              {/* Range & Count Summary */}
+              <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
+                <span>عرض</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
+                  {pageSize === 0 ? 1 : (safeCurrentPage - 1) * pageSize + 1}
+                </span>
+                <span>-</span>
+                <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
+                  {pageSize === 0 ? totalItems : Math.min(safeCurrentPage * pageSize, totalItems)}
+                </span>
+                <span>من أصل</span>
+                <span className="font-bold text-amber-600 dark:text-amber-400 font-mono px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/60">
+                  {totalItems}
+                </span>
+                <span>موظفاً</span>
+              </div>
+
+              {/* Page Size Switcher (25 / 50 / 100 / الكل) */}
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 dark:text-slate-400 hidden md:inline">عدد الموظفين بالصفحة:</span>
+                <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+                  {[20, 30, 50, 100, 0].map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => {
+                        setPageSize(size);
+                        setCurrentPage(1);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition-all cursor-pointer ${
+                        pageSize === size
+                          ? 'bg-amber-500 text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      {size === 0 ? 'الكل' : size}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pagination Navigation Controls */}
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1.5" dir="rtl">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={safeCurrentPage <= 1}
+                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-35 disabled:cursor-not-allowed transition-colors font-medium flex items-center gap-1 cursor-pointer"
+                    title="الصفحة السابقة"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">السابق</span>
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter((p) => {
+                        if (totalPages <= 7) return true;
+                        if (p === 1 || p === totalPages) return true;
+                        return Math.abs(p - safeCurrentPage) <= 1;
+                      })
+                      .reduce<(number | string)[]>((acc, p, idx, arr) => {
+                        if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) {
+                          acc.push('...');
+                        }
+                        acc.push(p);
+                        return acc;
+                      }, [])
+                      .map((p, idx) =>
+                        p === '...' ? (
+                          <span key={`dots-${idx}`} className="px-1 text-slate-400 font-mono">
+                            ...
+                          </span>
+                        ) : (
+                          <button
+                            key={`page-${p}`}
+                            type="button"
+                            onClick={() => setCurrentPage(p as number)}
+                            className={`w-7 h-7 rounded-xl font-bold font-mono text-xs transition-colors cursor-pointer ${
+                              safeCurrentPage === p
+                                ? 'bg-amber-600 text-white shadow-xs'
+                                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        )
+                      )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safeCurrentPage >= totalPages}
+                    className="px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-35 disabled:cursor-not-allowed transition-colors font-medium flex items-center gap-1 cursor-pointer"
+                    title="الصفحة التالية"
+                  >
+                    <span className="hidden sm:inline">التالي</span>
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* SECTION 2: ADVANCED REPORTS ENGINE (DAILY / WEEKLY / MONTHLY / CUSTOM)    */}
+      {/* SECTION: 5-YEAR LEAVE MANAGEMENT (IRAQI CIVIL SERVICE LAW)                */}
       {/* ========================================================================= */}
+      {activeTab === 'five_year_leaves' && (
+        <div className="space-y-6">
+          {/* 1. Header Banner */}
+          <div className="p-6 rounded-3xl bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white border border-purple-800 shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-80 h-80 bg-purple-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-400/20 text-purple-200 border border-purple-400/30">
+                    ضوابط الخدمة المدنية والموازنة العامة
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-400/20 text-amber-200 border border-amber-400/30">
+                    توقيفات تقاعدية 10%
+                  </span>
+                </div>
+                <h2 className="text-xl font-black text-white flex items-center gap-2.5">
+                  <Briefcase className="w-6 h-6 text-purple-300" />
+                  <span>مركز منح وإدارة إجازة الخمس (5) سنوات براتب اسمي</span>
+                </h2>
+                <p className="text-xs text-purple-200/80 mt-1 max-w-2xl">
+                  منح وتمديد وقطع إجازات الـ 5 سنوات للموظفين على الملاك الدائم براتب اسمي كامل أو نصف راتب اسمي مع احتساب التوقيفات التقاعدية وإصدار الأوامر الإدارية الرسمية.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white/10 backdrop-blur-sm border border-white/20">
+                  إجمالي المتمتعين: {fiveYearMetrics.count} موظف
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Statistical KPI Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">مجازو الـ 5 سنوات حالياً</span>
+              <div className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400 mt-1">
+                {fiveYearMetrics.count} <span className="text-xs font-normal">موظف</span>
+              </div>
+              <span className="text-[10px] text-slate-400">إجازة رسمية سارية المفعول</span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">إجمالي الرواتب الاسمية</span>
+              <div className="text-lg font-black font-mono text-slate-900 dark:text-white mt-1 truncate">
+                {fiveYearMetrics.totalBase.toLocaleString('en-US')} <span className="text-xs font-normal">د.ع</span>
+              </div>
+              <span className="text-[10px] text-slate-400">الرواتب الاسمية للكوادر المجازة</span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">توقيفات صندوق التقاعد (10%)</span>
+              <div className="text-lg font-black font-mono text-amber-600 dark:text-amber-400 mt-1 truncate">
+                {fiveYearMetrics.totalPensionDeduction.toLocaleString('en-US')} <span className="text-xs font-normal">د.ع</span>
+              </div>
+              <span className="text-[10px] text-amber-600 dark:text-amber-400">مستقطعة لحساب التوقيفات</span>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs">
+              <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">صافي المستحقات المصروفة</span>
+              <div className="text-lg font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1 truncate">
+                {fiveYearMetrics.totalNetPaid.toLocaleString('en-US')} <span className="text-xs font-normal">د.ع</span>
+              </div>
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400">المبلغ الشهري الصافي المصروف</span>
+            </div>
+          </div>
+
+          {/* 3. Grant New 5-Year Leave Form */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-700">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                  <Briefcase className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                    استمارة منح إجازة خمس (5) سنوات وإصدار الأمر الإداري
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    حدد الموظف ونوع الاستحقاق المالي لحساب الراتب والتوقيفات وإصدار الأمر الإداري فوراً
+                  </p>
+                </div>
+              </div>
+
+              <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800">
+                المدة القانونية: 5 سنوات (1826 يوم)
+              </span>
+            </div>
+
+            <form onSubmit={handleGrantFiveYearLeave} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Employee Selection */}
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    اختيار الموظف المستحق *
+                  </label>
+                  <select
+                    required
+                    value={selectedEmpIdForFiveYear}
+                    onChange={(e) => setSelectedEmpIdForFiveYear(e.target.value)}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-bold focus:ring-2 focus:ring-purple-500/40"
+                  >
+                    <option value="">-- اختر موظفاً من القائمة --</option>
+                    {employees
+                      .filter((e) => e.status !== 'five_year_leave' && e.status !== 'retired')
+                      .map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.fullName} ({emp.employeeNumber}) — {emp.jobTitle} [{emp.department}]
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {/* Salary Type Selection */}
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    نوع الراتب المستحق بالإجازة *
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFiveYearSalaryType('full_base_salary')}
+                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer font-bold ${
+                        fiveYearSalaryType === 'full_base_salary'
+                          ? 'bg-purple-50 dark:bg-purple-950/40 border-purple-500 text-purple-900 dark:text-purple-200 shadow-xs'
+                          : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      راتب اسمي كامل (100%)
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setFiveYearSalaryType('half_base_salary')}
+                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer font-bold ${
+                        fiveYearSalaryType === 'half_base_salary'
+                          ? 'bg-purple-50 dark:bg-purple-950/40 border-purple-500 text-purple-900 dark:text-purple-200 shadow-xs'
+                          : 'bg-slate-50 dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      نصف راتب اسمي (50%)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Pension Deduction Percent */}
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    نسبة التوقيفات التقاعدية لصندوق التقاعد
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={fiveYearPensionPercent}
+                      onChange={(e) => setFiveYearPensionPercent(Number(e.target.value))}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono font-bold focus:ring-2 focus:ring-purple-500/40"
+                    >
+                      <option value={10}>10% (استقطاع قانوني قياسي للموظف)</option>
+                      <option value={25}>25% (حصة الموظف + حصة الدائرة التراكمية)</option>
+                      <option value={0}>0% (معفى استثنائياً)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Dates and Order Info */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-1">
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    تاريخ انفكاك وبدء الإجازة
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={fiveYearStartDate}
+                    onChange={(e) => {
+                      const newStart = e.target.value;
+                      setFiveYearStartDate(newStart);
+                      if (newStart) {
+                        const d = new Date(newStart);
+                        d.setFullYear(d.getFullYear() + 5);
+                        setFiveYearEndDate(d.toISOString().slice(0, 10));
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-purple-500/40"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    تاريخ انتهاء الإجازة (تلقائي 5 سنوات)
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={fiveYearEndDate}
+                    onChange={(e) => setFiveYearEndDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-purple-500/40"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    رقم الأمر الإداري الوزاري *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={fiveYearOrderNumber}
+                    onChange={(e) => setFiveYearOrderNumber(e.target.value)}
+                    placeholder="إج5-2026-001"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-purple-500/40"
+                    dir="ltr"
+                    style={{ textAlign: 'right' }}
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                    تاريخ صدور الأمر
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={fiveYearOrderDate}
+                    onChange={(e) => setFiveYearOrderDate(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono focus:ring-2 focus:ring-purple-500/40"
+                  />
+                </div>
+              </div>
+
+              {/* Real-time Financial Calculation Card */}
+              {(() => {
+                const targetEmp = employees.find((x) => x.id === selectedEmpIdForFiveYear);
+                const base = targetEmp?.baseSalary || 500000;
+                const monthlyPaid = fiveYearSalaryType === 'full_base_salary' ? base : Math.round(base / 2);
+                const pensionDeduct = Math.round(base * (fiveYearPensionPercent / 100));
+                const netPaid = Math.max(0, monthlyPaid - pensionDeduct);
+
+                return (
+                  <div className="p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/80 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5 text-xs">
+                        <DollarSign className="w-4 h-4 text-indigo-600" />
+                        <span>الحساب المالي الشهري الدقيق للموظف أثناء الإجازة (وفق سلم الرواتب)</span>
+                      </span>
+                      {targetEmp && (
+                        <span className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300">
+                          {targetEmp.fullName} — الدرجة {targetEmp.civilGrade || 7} / المرحلة {targetEmp.civilStage || 1}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                        <div className="text-[10px] text-slate-500">الراتب الاسمي المعتمد:</div>
+                        <div className="font-black font-mono text-slate-900 dark:text-white">
+                          {base.toLocaleString('en-US')} د.ع
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                        <div className="text-[10px] text-slate-500">المبلغ الشهري المدفوع:</div>
+                        <div className="font-black font-mono text-purple-700 dark:text-purple-300">
+                          {monthlyPaid.toLocaleString('en-US')} د.ع
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                        <div className="text-[10px] text-slate-500">استقطاع التقاعد ({fiveYearPensionPercent}%):</div>
+                        <div className="font-black font-mono text-amber-600 dark:text-amber-400">
+                          -{pensionDeduct.toLocaleString('en-US')} د.ع
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                        <div className="text-[10px] text-slate-500">الصافي الشهري المستلم:</div>
+                        <div className="font-black font-mono text-emerald-600 dark:text-emerald-400 text-sm">
+                          {netPaid.toLocaleString('en-US')} د.ع
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Notes */}
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  ملاحظات والسند القانوني
+                </label>
+                <input
+                  type="text"
+                  value={fiveYearNotes}
+                  onChange={(e) => setFiveYearNotes(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white"
+                />
+              </div>
+
+              {/* Submit Button */}
+              <div className="flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={isGrantingFiveYear || !selectedEmpIdForFiveYear}
+                  className="px-6 py-2.5 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs shadow-md shadow-purple-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <Briefcase className="w-4 h-4" />
+                  <span>{isGrantingFiveYear ? 'جارٍ إصدار الأمر وحفظ القيد...' : 'إقرار ومنح إجازة الـ 5 سنوات وإصدار الأمر ⚡'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* 4. Active 5-Year Leaves Registry Table */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                  <Users className="w-4 h-4 text-purple-500" />
+                  <span>سجل الموظفين المتمتعين بإجازة الـ 5 سنوات ({fiveYearEmployees.length})</span>
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  متابعة المدد المتبقية، الرواتب المصروفة، وطباعة الأوامر الإدارية أو قطع الإجازة
+                </p>
+              </div>
+            </div>
+
+            {fiveYearEmployees.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 space-y-2">
+                <Briefcase className="w-12 h-12 mx-auto text-slate-300 dark:text-slate-600 stroke-1" />
+                <p className="text-sm font-bold text-slate-600 dark:text-slate-400">
+                  لا يوجد موظفون متمتعون بإجازة الـ 5 سنوات حالياً
+                </p>
+                <p className="text-xs">
+                  يمكنك اختيار أي موظف من الاستمارة أعلاه لمنحه إجازة خمس سنوات براتب اسمي وفق القانون
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-700">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 font-bold border-b border-slate-200 dark:border-slate-700">
+                    <tr>
+                      <th className="p-3">الموظف</th>
+                      <th className="p-3">القسم / العنوان</th>
+                      <th className="p-3">نوع الاستحقاق</th>
+                      <th className="p-3">الأمر الإداري</th>
+                      <th className="p-3">تاريخ البدء والنهاية</th>
+                      <th className="p-3">الصافي الشهري</th>
+                      <th className="p-3 text-center">الإجراءات</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/60">
+                    {fiveYearEmployees.map((emp) => {
+                      const leave = emp.fiveYearLeave;
+                      return (
+                        <tr key={emp.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">
+                            <div>{emp.fullName}</div>
+                            <div className="text-[10px] font-mono text-slate-400">{emp.employeeNumber}</div>
+                          </td>
+                          <td className="p-3 text-slate-600 dark:text-slate-300">
+                            <div>{emp.department}</div>
+                            <div className="text-[10px] text-slate-400">{emp.jobTitle}</div>
+                          </td>
+                          <td className="p-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
+                              {leave?.salaryType === 'half_base_salary' ? 'نصف اسمي (50%)' : 'اسمي كامل (100%)'}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-800 dark:text-slate-200">
+                            <div>{leave?.orderNumber || 'أمر رسمي'}</div>
+                            <div className="text-[10px] text-slate-400">{leave?.orderDate}</div>
+                          </td>
+                          <td className="p-3 font-mono text-slate-700 dark:text-slate-300">
+                            <div>{leave?.startDate}</div>
+                            <div className="text-[10px] text-slate-400">إلى {leave?.endDate}</div>
+                          </td>
+                          <td className="p-3 font-mono font-black text-emerald-600 dark:text-emerald-400">
+                            {(leave?.netMonthlyPaid || Math.round((emp.baseSalary || 500000) * 0.9)).toLocaleString('en-US')} د.ع
+                          </td>
+                          <td className="p-3 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setPrintingOrderEmployee(emp)}
+                                className="px-2.5 py-1.5 rounded-xl bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                                title="طباعة الأمر الإداري الرسمي A4"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                                <span>طباعة الأمر</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleInterruptFiveYearLeave(emp)}
+                                className="px-2.5 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                                title="قطع الإجازة والمباشرة بالدوام"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>قطع الإجازة</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 5. Printable 5-Year Leave Administrative Order Modal */}
+      {printingOrderEmployee && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm animate-fade-in no-print-bg">
+          <div className="relative w-full max-w-3xl rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-6 sm:p-8 space-y-6 max-h-[92vh] overflow-y-auto">
+            {/* Top Toolbar */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800 no-print">
+              <div className="flex items-center gap-2">
+                <Printer className="w-5 h-5 text-purple-600" />
+                <span className="font-bold text-sm text-slate-900 dark:text-white">
+                  معاينة الأمر الإداري الرسمي لإجازة الـ 5 سنوات (A4)
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-2 shadow-md cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>طباعة الآن (Print)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrintingOrderEmployee(null)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Official Printable Document Container */}
+            <div className="p-8 rounded-2xl bg-white text-slate-900 border border-slate-300 shadow-sm space-y-6 text-sm" dir="rtl">
+              {/* Official Iraqi Header */}
+              <div className="flex items-center justify-between pb-4 border-b-2 border-slate-900">
+                <div className="text-right">
+                  <div className="font-bold text-base">جمهورية العراق</div>
+                  <div className="font-bold text-sm">{organization?.ministryName || 'وزارة التعليم العالي والبحث العلمي'}</div>
+                  <div className="text-xs text-slate-700">{organization?.directorateName || 'الدائرة الإدارية والمالية'}</div>
+                  <div className="text-xs text-slate-700">قسم الموارد البشرية / شعبة الإجازات</div>
+                </div>
+
+                <div className="text-center">
+                  <GovernmentEmblem type={organization?.officialEmblem || 'golden_eagle'} className="w-16 h-16 mx-auto" />
+                  <div className="text-[10px] font-bold mt-1">شعار الدولة الرسمي</div>
+                </div>
+
+                <div className="text-left font-mono text-xs">
+                  <div>العدد: {printingOrderEmployee.fiveYearLeave?.orderNumber || 'إج5-2026-001'}</div>
+                  <div>التاريخ: {printingOrderEmployee.fiveYearLeave?.orderDate || new Date().toISOString().slice(0, 10)}</div>
+                </div>
+              </div>
+
+              {/* Title */}
+              <div className="text-center space-y-1">
+                <h2 className="text-lg font-black underline decoration-2 underline-offset-4">
+                  أمر إداري (منح إجازة خمس سنوات)
+                </h2>
+              </div>
+
+              {/* Preamble */}
+              <div className="leading-relaxed text-justify text-xs space-y-2">
+                <p>
+                  استناداً إلى أحكام المادة (43/مكرر) من قانون الخدمة المدنية رقم (24) لسنة 1960 المعدل، وبموجب الصلاحيات المخولة لنا بموجب القوانين والتعليمات الوزارية النافذة، ولتوفر الشروط القانونية المنصوص عليها،
+                </p>
+                <p className="font-bold text-center py-2 text-sm">
+                  /// قــــــــــــــــــــــــــــــررنـــــــــــــــــــــــــــــــا ///
+                </p>
+                <p>
+                  منح الموظف المذكورة بياناته أدناه إجازة لمدة خمس (5) سنوات{' '}
+                  <span className="font-bold">
+                    ({printingOrderEmployee.fiveYearLeave?.salaryType === 'half_base_salary' ? 'بنصف راتب اسمي' : 'براتب اسمي كامل'})
+                  </span>{' '}
+                  مع استقطاع نسبة التوقيفات التقاعدية القانونية البالغة ({printingOrderEmployee.fiveYearLeave?.pensionDeductionPercent || 10}%) شهرياً وإيداعها في صندوق تقاعد موظفي الدولة:
+                </p>
+              </div>
+
+              {/* Employee Information Table */}
+              <table className="w-full text-xs border border-slate-900 text-right">
+                <tbody>
+                  <tr className="border-b border-slate-900 bg-slate-50">
+                    <td className="p-2 font-bold w-1/4 border-l border-slate-900">الاسم الرباعي واللقب:</td>
+                    <td className="p-2 font-bold w-1/4 border-l border-slate-900">{printingOrderEmployee.fullName}</td>
+                    <td className="p-2 font-bold w-1/4 border-l border-slate-900">الرقم الوظيفي المركزي:</td>
+                    <td className="p-2 font-mono w-1/4">{printingOrderEmployee.employeeNumber}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900">
+                    <td className="p-2 font-bold border-l border-slate-900">العنوان الوظيفي:</td>
+                    <td className="p-2 border-l border-slate-900">{printingOrderEmployee.jobTitle}</td>
+                    <td className="p-2 font-bold border-l border-slate-900">الدرجة والمرحلة:</td>
+                    <td className="p-2 font-mono">الدرجة {printingOrderEmployee.civilGrade || 7} / المرحلة {printingOrderEmployee.civilStage || 1}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900 bg-slate-50">
+                    <td className="p-2 font-bold border-l border-slate-900">القسم / التشكيل:</td>
+                    <td className="p-2 border-l border-slate-900">{printingOrderEmployee.department}</td>
+                    <td className="p-2 font-bold border-l border-slate-900">نوع الملاك:</td>
+                    <td className="p-2">{printingOrderEmployee.contractType === 'permanent' ? 'ملاك دائم' : 'عقد وزاري'}</td>
+                  </tr>
+                  <tr className="border-b border-slate-900">
+                    <td className="p-2 font-bold border-l border-slate-900">الراتب الاسمي المعتمد:</td>
+                    <td className="p-2 font-mono border-l border-slate-900 font-bold">
+                      {(printingOrderEmployee.fiveYearLeave?.baseSalaryAtLeave || printingOrderEmployee.baseSalary || 500000).toLocaleString('en-US')} د.ع
+                    </td>
+                    <td className="p-2 font-bold border-l border-slate-900">الصافي الشهري المستلم:</td>
+                    <td className="p-2 font-mono font-bold">
+                      {(printingOrderEmployee.fiveYearLeave?.netMonthlyPaid || Math.round((printingOrderEmployee.baseSalary || 500000) * 0.9)).toLocaleString('en-US')} د.ع
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-bold border-l border-slate-900">تاريخ بدء الإجازة (الانفكاك):</td>
+                    <td className="p-2 font-mono border-l border-slate-900 font-bold">{printingOrderEmployee.fiveYearLeave?.startDate}</td>
+                    <td className="p-2 font-bold border-l border-slate-900">تاريخ انتهاء الإجازة:</td>
+                    <td className="p-2 font-mono font-bold">{printingOrderEmployee.fiveYearLeave?.endDate}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              {/* Instructions and Signatures */}
+              <div className="pt-4 space-y-8 text-xs">
+                <div className="flex justify-between items-end pt-8">
+                  <div>
+                    <div className="font-bold">نسخة منه إلى:</div>
+                    <ul className="text-[10px] list-disc list-inside text-slate-700 mt-1 space-y-0.5">
+                      <li>مكتب السيد الوزير / المدير العام المحترم.. للتفضل بالاطلاع.</li>
+                      <li>هيئة التقاعد الوطنية / صندوق تقاعد موظفي الدولة.. لإجراء اللازم.</li>
+                      <li>قسم الشؤون المالية والرواتب.. لترويج الراتب الاسمي واستقطاع التوقيفات.</li>
+                      <li>شعبة الأضابير والتوثيق الإلكتروني.. للحفظ في إضبارة الموظف.</li>
+                      <li>الموظف المعني.. للعلم والمباشرة بالإجراءات.</li>
+                    </ul>
+                  </div>
+
+                  <div className="text-center space-y-1">
+                    <div className="font-bold text-sm">المدير العام / رئيس الدائرة</div>
+                    <div className="text-xs text-slate-600">عن وزير التعليم العالي والبحث العلمي</div>
+                    <div className="pt-8 text-xs font-mono font-bold">التوقيع والختم الرسمي</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {activeTab === 'reports' && (
         <div className="space-y-4">
           {/* Report Engine Control Panel */}
@@ -1313,15 +2262,15 @@ export function DailyMovementsHub({
 
                         {/* 4. Contract Type (No Job Title) */}
                         <td className="p-3 text-center">
-                          {rec.contractType === 'permanent' ? (
-                            <span className="text-[11px] font-bold text-amber-700 dark:text-amber-300">
-                              ملاك دائم
-                            </span>
-                          ) : (
-                            <span className="text-[11px] font-bold text-blue-700 dark:text-blue-300">
-                              عقد وزاري (315)
-                            </span>
-                          )}
+                          <span
+                            className={`text-[11px] font-bold ${
+                              rec.contractType === 'permanent'
+                                ? 'text-amber-700 dark:text-amber-300'
+                                : 'text-blue-700 dark:text-blue-300'
+                            }`}
+                          >
+                            {getContractTypeLabel(rec.contractType, employmentLabels)}
+                          </span>
                         </td>
 
                         {/* 5. Movement Title */}
@@ -1484,6 +2433,7 @@ export function DailyMovementsHub({
         endDate={customEndDate}
         departmentName={departmentFilter === 'ALL' ? 'كافة التشكيلات' : departmentFilter}
         stats={reportStats}
+        employmentLabels={employmentLabels}
       />
     </div>
   );

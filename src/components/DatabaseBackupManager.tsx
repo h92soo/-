@@ -27,8 +27,10 @@ import {
   Home,
   Zap,
   FileText,
+  Monitor,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { DesktopExportModal } from './DesktopExportModal';
 import {
   getDatabaseStatistics,
   downloadDatabaseBackupFile,
@@ -85,6 +87,7 @@ export const DatabaseBackupManager: React.FC<DatabaseBackupManagerProps> = ({
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoreSuccessMessage, setRestoreSuccessMessage] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showDesktopModal, setShowDesktopModal] = useState(false);
 
   // Cloud Backup & Google Drive Sync State
   const [cloudEmail, setCloudEmail] = useState<string>(() => {
@@ -375,15 +378,27 @@ export const DatabaseBackupManager: React.FC<DatabaseBackupManagerProps> = ({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={fetchStats}
-          disabled={isLoadingStats}
-          className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer self-start md:self-center shrink-0"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoadingStats ? 'animate-spin text-blue-500' : ''}`} />
-          <span>تحديث الإحصائيات</span>
-        </button>
+        <div className="flex items-center gap-2 self-start md:self-center shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowDesktopModal(true)}
+            className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            title="تحويل وتثبيت المنظومة كتطبيق سطح مكتب Windows (.exe)"
+          >
+            <Monitor className="w-3.5 h-3.5" />
+            <span>تطبيق سطح المكتب (exe.)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={fetchStats}
+            disabled={isLoadingStats}
+            className="px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingStats ? 'animate-spin text-blue-500' : ''}`} />
+            <span>تحديث الإحصائيات</span>
+          </button>
+        </div>
       </div>
 
       {/* Live Database Statistics Bar */}
@@ -1016,6 +1031,12 @@ export const DatabaseBackupManager: React.FC<DatabaseBackupManagerProps> = ({
           <span className="font-mono">مطور المنظومة: المهندس حسين عبد المنذر (07711145014)</span>
         </div>
       </div>
+
+      {/* Desktop App (.exe) Modal */}
+      <DesktopExportModal
+        isOpen={showDesktopModal}
+        onClose={() => setShowDesktopModal(false)}
+      />
     </div>
   );
 };

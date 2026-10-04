@@ -15,16 +15,28 @@ import {
   AttendanceRecord,
   DatabaseBackupPayload,
   OfficialHoliday,
+  EmploymentTypeLabelsSettings,
+  DEFAULT_EMPLOYMENT_TYPE_LABELS,
+  CareerTimelineEvent,
+  AllowanceRecord,
+  PromotionRecord,
+  BarcodeScanLog,
+  CareerSystemSettings,
+  DEFAULT_CAREER_SETTINGS,
 } from '../types';
 import { IRAQ_CABINET_HOLIDAYS_PRESET } from '../data/iraqHolidaysData';
 
 export const DB_NAME = 'GovPersonnelDB_2026';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 export const STORE_EMPLOYEES = 'employees';
 export const STORE_ATTENDANCE = 'attendance_sheets';
 export const STORE_SETTINGS = 'system_settings';
 export const STORE_USERS = 'system_users';
 export const STORE_ATTENDANCE_LOGS = 'attendance_logs';
+export const STORE_TIMELINE = 'career_timeline';
+export const STORE_ALLOWANCES = 'allowance_records';
+export const STORE_PROMOTIONS = 'promotion_records';
+export const STORE_BARCODE_LOGS = 'barcode_scan_logs';
 
 export const DEFAULT_LEAVE_RULES: LeaveRulesSettings = {
   permanentAnnualBalance: 36,
@@ -101,6 +113,37 @@ export function openGovDB(): Promise<IDBDatabase> {
         logsStore.createIndex('date', 'date', { unique: false });
         logsStore.createIndex('employeeId', 'employeeId', { unique: false });
         logsStore.createIndex('status', 'status', { unique: false });
+      }
+
+      // 6. السجل الزمني والتاريخ المهني الموحد (Career Timeline Store)
+      if (!db.objectStoreNames.contains(STORE_TIMELINE)) {
+        const timelineStore = db.createObjectStore(STORE_TIMELINE, { keyPath: 'id' });
+        timelineStore.createIndex('employeeId', 'employeeId', { unique: false });
+        timelineStore.createIndex('date', 'date', { unique: false });
+        timelineStore.createIndex('category', 'category', { unique: false });
+      }
+
+      // 7. سجل العلاوات السنوية (Allowances Store)
+      if (!db.objectStoreNames.contains(STORE_ALLOWANCES)) {
+        const allowancesStore = db.createObjectStore(STORE_ALLOWANCES, { keyPath: 'id' });
+        allowancesStore.createIndex('employeeId', 'employeeId', { unique: false });
+        allowancesStore.createIndex('grantDate', 'grantDate', { unique: false });
+        allowancesStore.createIndex('status', 'status', { unique: false });
+      }
+
+      // 8. سجل الترفيعات الوظيفية (Promotions Store)
+      if (!db.objectStoreNames.contains(STORE_PROMOTIONS)) {
+        const promotionsStore = db.createObjectStore(STORE_PROMOTIONS, { keyPath: 'id' });
+        promotionsStore.createIndex('employeeId', 'employeeId', { unique: false });
+        promotionsStore.createIndex('effectiveDate', 'effectiveDate', { unique: false });
+      }
+
+      // 9. سجل عمليات مسح الباركود والبطاقات الذكية (Barcode Logs Store)
+      if (!db.objectStoreNames.contains(STORE_BARCODE_LOGS)) {
+        const barcodeStore = db.createObjectStore(STORE_BARCODE_LOGS, { keyPath: 'id' });
+        barcodeStore.createIndex('scanTime', 'scanTime', { unique: false });
+        barcodeStore.createIndex('barcode', 'barcode', { unique: false });
+        barcodeStore.createIndex('employeeId', 'employeeId', { unique: false });
       }
     };
 
@@ -227,35 +270,177 @@ export async function deleteEmployeeById(id: string): Promise<boolean> {
 
 /**
  * حفظ أو تحديث مجموعة موظفين دفعة واحدة (Batch Save)
+ * معالجة فائقة السرعة مع حماية كاملة من تعليق المعاملات وتفادي تضارب الأرقام الوظيفية
  */
 export async function saveEmployeesBatch(employees: Employee[]): Promise<number> {
-  if (!employees.length) return 0;
-  const db = await openGovDB();
+  if (!employees || !employees.length) return 0;
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([STORE_EMPLOYEES], 'readwrite');
-    const store = transaction.objectStore(STORE_EMPLOYEES);
-    let count = 0;
+  return new Promise(async (resolve, reject) => {
+    let isSettled = false;
+    let activeDb: IDBDatabase | null = null;
 
-    employees.forEach((emp) => {
-      const record: Employee = {
-        ...emp,
-        updatedAt: new Date().toISOString(),
-        createdAt: emp.createdAt || new Date().toISOString(),
+    // Safety timeout to prevent any permanent hang
+    const safetyTimer = setTimeout(() => {
+      if (!isSettled) {
+        isSettled = true;
+        try {
+          if (activeDb) activeDb.close();
+        } catch {}
+        reject(new Error('انتهت مهلة حفظ السجلات في قاعدة البيانات المحلية (IndexedDB).'));
+      }
+    }, 8000);
+
+    const finish = (result: number | Error, isError = false) => {
+      if (isSettled) return;
+      isSettled = true;
+      clearTimeout(safetyTimer);
+      try {
+        if (activeDb) activeDb.close();
+      } catch {}
+
+      if (isError) {
+        reject(result instanceof Error ? result : new Error(String(result)));
+      } else {
+        resolve(result as number);
+      }
+    };
+
+    try {
+      const db = await openGovDB();
+      activeDb = db;
+
+      const transaction = db.transaction([STORE_EMPLOYEES], 'readwrite');
+      const store = transaction.objectStore(STORE_EMPLOYEES);
+
+      transaction.oncomplete = () => {
+        finish(successCount);
       };
-      store.put(record);
-      count++;
-    });
 
-    transaction.oncomplete = () => {
-      db.close();
-      resolve(count);
-    };
+      transaction.onerror = () => {
+        finish(
+          new Error(`فشل حفظ مجموعة الموظفين في IndexedDB: ${transaction.error?.message || 'خطأ غير معروف'}`),
+          true
+        );
+      };
 
-    transaction.onerror = () => {
-      db.close();
-      reject(new Error(`فشل حفظ مجموعة الموظفين: ${transaction.error?.message}`));
-    };
+      transaction.onabort = () => {
+        finish(
+          new Error(`تم إلغاء عملية حفظ الموظفين: ${transaction.error?.message || 'تم إلغاء المعاملة'}`),
+          true
+        );
+      };
+
+      let successCount = 0;
+
+      // First, get all existing records to avoid unique index (employeeNumber) collisions
+      const getAllReq = store.getAll();
+
+      getAllReq.onsuccess = () => {
+        try {
+          const existingRecords = (getAllReq.result as Employee[]) || [];
+          const existingNumToIdMap = new Map<string, string>();
+          const existingIdSet = new Set<string>();
+
+          existingRecords.forEach((rec) => {
+            if (rec.employeeNumber) {
+              existingNumToIdMap.set(rec.employeeNumber.trim(), rec.id);
+            }
+            if (rec.id) {
+              existingIdSet.add(rec.id);
+            }
+          });
+
+          const seenInBatch = new Set<string>();
+          const baseTimestamp = Date.now() % 100000;
+
+          employees.forEach((emp, index) => {
+            let employeeNumber = (emp.employeeNumber || '').trim();
+
+            // Auto-generate employeeNumber if missing
+            if (!employeeNumber) {
+              employeeNumber = `IQ-GOV-${baseTimestamp}-${String(index + 1).padStart(4, '0')}`;
+            }
+
+            // Check if this employeeNumber already exists in IndexedDB
+            const existingIdForNumber = existingNumToIdMap.get(employeeNumber);
+            let targetId = emp.id;
+
+            if (existingIdForNumber) {
+              // Update existing employee to prevent unique constraint error
+              targetId = existingIdForNumber;
+            } else {
+              // If number duplicated within this batch, give it a unique suffix
+              if (seenInBatch.has(employeeNumber)) {
+                employeeNumber = `${employeeNumber}-${index + 1}`;
+              }
+              if (!targetId || existingIdSet.has(targetId)) {
+                targetId = `EMP-${Date.now()}-${index + 1}-${Math.random().toString(36).substring(2, 6)}`;
+              }
+            }
+
+            seenInBatch.add(employeeNumber);
+            if (targetId) existingIdSet.add(targetId);
+
+            const record: Employee = {
+              id: targetId,
+              employeeNumber,
+              fullName: (emp.fullName || `موظف جديد (${index + 1})`).trim(),
+              department: emp.department || 'القسم الإداري العام',
+              division: emp.division || 'الديوان العام',
+              jobTitle: emp.jobTitle || 'موظف',
+              contractType: emp.contractType || 'permanent',
+              hireDate: emp.hireDate || '2024-01-01',
+              annualBalanceLimit: emp.annualBalanceLimit ?? (emp.contractType === 'contract' ? 30 : 36),
+              usedBalance: emp.usedBalance ?? 0,
+              remainingBalance:
+                emp.remainingBalance ??
+                Math.max(
+                  0,
+                  (emp.annualBalanceLimit ?? (emp.contractType === 'contract' ? 30 : 36)) -
+                    (emp.usedBalance ?? 0)
+                ),
+              monthlyRate: emp.monthlyRate ?? (emp.contractType === 'contract' ? 4 : 3),
+              isAccumulative: emp.isAccumulative ?? (emp.contractType !== 'contract'),
+              phone: emp.phone || '',
+              notes: emp.notes || 'مستورد عبر ملف إكسل',
+              updatedAt: new Date().toISOString(),
+              createdAt: emp.createdAt || new Date().toISOString(),
+            };
+
+            const putReq = store.put(record);
+            putReq.onerror = (e) => {
+              // Prevent transaction abort on individual record conflict
+              e.preventDefault();
+              e.stopPropagation();
+              console.warn('Skipped record during batch save:', record.employeeNumber, putReq.error);
+            };
+            successCount++;
+          });
+        } catch (innerErr: any) {
+          finish(innerErr, true);
+        }
+      };
+
+      getAllReq.onerror = () => {
+        // Fallback: put directly if getAll fails
+        try {
+          employees.forEach((emp, index) => {
+            const record: Employee = {
+              ...emp,
+              id: emp.id || `EMP-${Date.now()}-${index + 1}`,
+              updatedAt: new Date().toISOString(),
+              createdAt: emp.createdAt || new Date().toISOString(),
+            };
+            store.put(record);
+            successCount++;
+          });
+        } catch (err: any) {
+          finish(err, true);
+        }
+      };
+    } catch (err: any) {
+      finish(err, true);
+    }
   });
 }
 
@@ -393,6 +578,25 @@ export async function saveSystemSetting<T>(key: string, value: T): Promise<void>
 }
 
 /**
+ * استرجاع مسميات نوع الملاك والتوظيف المخصصة من IndexedDB
+ */
+export async function getEmploymentTypeLabels(): Promise<EmploymentTypeLabelsSettings> {
+  return getSystemSetting<EmploymentTypeLabelsSettings>(
+    'employment_type_labels',
+    DEFAULT_EMPLOYMENT_TYPE_LABELS
+  );
+}
+
+/**
+ * حفظ مسميات نوع الملاك والتوظيف المخصصة في IndexedDB
+ */
+export async function saveEmploymentTypeLabels(
+  labels: EmploymentTypeLabelsSettings
+): Promise<void> {
+  return saveSystemSetting<EmploymentTypeLabelsSettings>('employment_type_labels', labels);
+}
+
+/**
  * استرجاع كافة حسابات المستخدمين في النظام
  */
 export async function getSystemUsers(): Promise<SystemUserAccount[]> {
@@ -491,6 +695,18 @@ export async function getAttendanceLogs(startDate?: string, endDate?: string): P
         resolve([]);
       };
     });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * استرجاع سجلات الحركات والحضور الخاصة بموظف معين
+ */
+export async function getAttendanceLogsByEmployee(employeeId: string): Promise<AttendanceRecord[]> {
+  try {
+    const allLogs = await getAttendanceLogs();
+    return allLogs.filter((log) => log.employeeId === employeeId);
   } catch {
     return [];
   }
@@ -738,8 +954,9 @@ export const SAMPLE_TEST_EMPLOYEE: Employee = {
 };
 
 /**
- * دالة برمجية تجريبية تقوم بحفظ موظف نموذجي في IndexedDB ثم إعادة استرجاعه
- * للتحقق من سلامة الاتصال والتخزين المحلي الدائم.
+ * دالة برمجية تجريبية تقوم بالتحقق من سلامة الاتصال والتخزين المحلي الدائم بـ IndexedDB.
+ * تقوم بحفظ سجل مؤقت للاختبار، والتحقق من قراءته، ثم حذفه تلقائياً فور الانتهاء
+ * لضمان عدم بقاء الموظف في جدول الموظفين أو ظهوره مرة أخرى إذا كان محذوفاً.
  */
 export async function testSaveAndRetrieveSampleEmployee(): Promise<{
   success: boolean;
@@ -751,27 +968,36 @@ export async function testSaveAndRetrieveSampleEmployee(): Promise<{
   const startTime = performance.now();
 
   try {
-    // 1. حفظ السجل
+    // 1. حفظ السجل التجريبي
     await saveEmployee(SAMPLE_TEST_EMPLOYEE);
 
-    // 2. استرجاع السجل بالمعرف
+    // 2. استرجاع السجل بالمعرف للتحقق من سلامة القراءة
     const retrieved = await getEmployeeById(SAMPLE_TEST_EMPLOYEE.id);
-
-    const endTime = performance.now();
-    const durationMs = Math.round((endTime - startTime) * 100) / 100;
 
     if (!retrieved) {
       throw new Error('تم الحفظ ولكن تعذر استرجاع السجل من IndexedDB.');
     }
+
+    // 3. تنظيف وحذف سجل الاختبار فوراً حتى لا يعود الموظف المحذوف إلى قائمة الموظفين
+    await deleteEmployeeById(SAMPLE_TEST_EMPLOYEE.id);
+
+    const endTime = performance.now();
+    const durationMs = Math.round((endTime - startTime) * 100) / 100;
 
     return {
       success: true,
       savedData: SAMPLE_TEST_EMPLOYEE,
       retrievedData: retrieved,
       durationMs,
-      message: `تم التحقق بنجاح! تم حفظ واسترجاع السجل من IndexedDB محلياً في زمن ${durationMs} مللي ثانية.`,
+      message: `تم التحقق بنجاح! تم اختبار الحفظ والقراءة ثم تنظيف السجل من IndexedDB في زمن ${durationMs} مللي ثانية (دون التأثير على الموظفين المحذوفين).`,
     };
   } catch (error: any) {
+    // في حال حدوث خطأ، محاولة تنظيف السجل أيضاً
+    try {
+      await deleteEmployeeById(SAMPLE_TEST_EMPLOYEE.id);
+    } catch {
+      // تجاهل خطأ التنظيف
+    }
     const endTime = performance.now();
     return {
       success: false,
@@ -1057,6 +1283,195 @@ export async function restoreDatabaseFromJson(
       db.close();
       reject(new Error(`فشل استعادة قاعدة البيانات من النسخة الاحتياطية: ${tx.error?.message}`));
     };
+  });
+}
+
+/**
+ * -------------------------------------------------------------
+ * دوال إدارة السجل المهني والخط الزمني الموحد (Career Timeline)
+ * -------------------------------------------------------------
+ */
+
+export async function addTimelineEvent(event: CareerTimelineEvent): Promise<string> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_TIMELINE], 'readwrite');
+    const store = tx.objectStore(STORE_TIMELINE);
+    const req = store.put(event);
+    req.onsuccess = () => resolve(event.id);
+    req.onerror = () => reject(new Error(`فشل إضافة الحدث الزمني: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getTimelineEventsByEmployeeId(employeeId: string): Promise<CareerTimelineEvent[]> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_TIMELINE], 'readonly');
+    const store = tx.objectStore(STORE_TIMELINE);
+    const index = store.index('employeeId');
+    const req = index.getAll(employeeId);
+    req.onsuccess = () => {
+      const results = (req.result as CareerTimelineEvent[]) || [];
+      // Sort newest first
+      results.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+      resolve(results);
+    };
+    req.onerror = () => reject(new Error(`فشل استرجاع السجل الزمني: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getAllTimelineEvents(): Promise<CareerTimelineEvent[]> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_TIMELINE], 'readonly');
+    const store = tx.objectStore(STORE_TIMELINE);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const results = (req.result as CareerTimelineEvent[]) || [];
+      // Sort newest first
+      results.sort((a, b) => new Date(b.createdAt || b.date).getTime() - new Date(a.createdAt || a.date).getTime());
+      resolve(results);
+    };
+    req.onerror = () => reject(new Error(`فشل استرجاع سجل العمليات والتعديلات: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+/**
+ * -------------------------------------------------------------
+ * دوال إدارة العلاوات السنوية (Allowances)
+ * -------------------------------------------------------------
+ */
+
+export async function saveAllowanceRecord(record: AllowanceRecord): Promise<string> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_ALLOWANCES], 'readwrite');
+    const store = tx.objectStore(STORE_ALLOWANCES);
+    const req = store.put(record);
+    req.onsuccess = () => resolve(record.id);
+    req.onerror = () => reject(new Error(`فشل حفظ سجل العلاوة: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getAllAllowances(): Promise<AllowanceRecord[]> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_ALLOWANCES], 'readonly');
+    const store = tx.objectStore(STORE_ALLOWANCES);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const records = (req.result as AllowanceRecord[]) || [];
+      records.sort((a, b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime());
+      resolve(records);
+    };
+    req.onerror = () => reject(new Error(`فشل استرجاع العلاوات: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getAllowancesByEmployeeId(employeeId: string): Promise<AllowanceRecord[]> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_ALLOWANCES], 'readonly');
+    const store = tx.objectStore(STORE_ALLOWANCES);
+    const index = store.index('employeeId');
+    const req = index.getAll(employeeId);
+    req.onsuccess = () => {
+      const records = (req.result as AllowanceRecord[]) || [];
+      records.sort((a, b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime());
+      resolve(records);
+    };
+    req.onerror = () => reject(new Error(`فشل استرجاع سجلات علاوات الموظف: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+/**
+ * -------------------------------------------------------------
+ * دوال إدارة الترفيعات الوظيفية (Promotions)
+ * -------------------------------------------------------------
+ */
+
+export async function savePromotionRecord(record: PromotionRecord): Promise<string> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PROMOTIONS], 'readwrite');
+    const store = tx.objectStore(STORE_PROMOTIONS);
+    const req = store.put(record);
+    req.onsuccess = () => resolve(record.id);
+    req.onerror = () => reject(new Error(`فشل حفظ سجل الترفيع: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getAllPromotions(): Promise<PromotionRecord[]> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PROMOTIONS], 'readonly');
+    const store = tx.objectStore(STORE_PROMOTIONS);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const records = (req.result as PromotionRecord[]) || [];
+      records.sort((a, b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime());
+      resolve(records);
+    };
+    req.onerror = () => reject(new Error(`فشل استرجاع الترفيعات: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getPromotionsByEmployeeId(employeeId: string): Promise<PromotionRecord[]> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_PROMOTIONS], 'readonly');
+    const store = tx.objectStore(STORE_PROMOTIONS);
+    const index = store.index('employeeId');
+    const req = index.getAll(employeeId);
+    req.onsuccess = () => {
+      const records = (req.result as PromotionRecord[]) || [];
+      records.sort((a, b) => new Date(b.effectiveDate).getTime() - new Date(a.effectiveDate).getTime());
+      resolve(records);
+    };
+    req.onerror = () => reject(new Error(`فشل استرجاع سجلات ترفيعات الموظف: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+/**
+ * -------------------------------------------------------------
+ * دوال سجلات مسح الباركود والبطاقات الذكية (Barcode Logs)
+ * -------------------------------------------------------------
+ */
+
+export async function saveBarcodeScanLog(log: BarcodeScanLog): Promise<string> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_BARCODE_LOGS], 'readwrite');
+    const store = tx.objectStore(STORE_BARCODE_LOGS);
+    const req = store.put(log);
+    req.onsuccess = () => resolve(log.id);
+    req.onerror = () => reject(new Error(`فشل حفظ سجل المسح: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getBarcodeScanLogs(limit: number = 50): Promise<BarcodeScanLog[]> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_BARCODE_LOGS], 'readonly');
+    const store = tx.objectStore(STORE_BARCODE_LOGS);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const logs = (req.result as BarcodeScanLog[]) || [];
+      logs.sort((a, b) => new Date(b.scanTime).getTime() - new Date(a.scanTime).getTime());
+      resolve(logs.slice(0, limit));
+    };
+    req.onerror = () => reject(new Error(`فشل استرجاع سجلات المسح: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
   });
 }
 

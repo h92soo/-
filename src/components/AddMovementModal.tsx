@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Clock,
   Calendar,
@@ -29,6 +30,7 @@ import {
   LeaveType,
 } from '../types';
 import { saveAttendanceLogsBatch, saveEmployee } from '../db/indexedDB';
+import { employeeService } from '../services/employeeService';
 
 interface AddMovementModalProps {
   isOpen: boolean;
@@ -277,6 +279,28 @@ const MOVEMENT_TYPES: MovementTypeOption[] = [
     defaultDeduct: false,
     badgeColor: 'bg-gray-100 text-gray-800 border-gray-300 dark:bg-gray-800 dark:text-gray-300',
     description: 'إجازة خاصة بموجب موافقة الوزير المختص دون استحقاق مالي',
+  },
+  {
+    id: 'leave_five_year_full',
+    category: 'leave',
+    title: 'إجازة خمس (5) سنوات براتب اسمي كامل (القانون العراقي)',
+    status: 'leave',
+    leaveType: 'five_year_full',
+    defaultDays: 1826,
+    defaultDeduct: false,
+    badgeColor: 'bg-indigo-100 text-indigo-900 border-indigo-300 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800',
+    description: 'تمنح للموظف لمدة 5 سنوات براتب اسمي كامل مع استقطاع 10% توقيفات تقاعدية لحساب صندوق التقاعد (قانون الموازنة والخدمة المدنية)',
+  },
+  {
+    id: 'leave_five_year_half',
+    category: 'leave',
+    title: 'إجازة خمس (5) سنوات بنصف راتب اسمي (القانون العراقي)',
+    status: 'leave',
+    leaveType: 'five_year_half',
+    defaultDays: 1826,
+    defaultDeduct: false,
+    badgeColor: 'bg-purple-100 text-purple-900 border-purple-300 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800',
+    description: 'تمنح للموظف لمدة 5 سنوات بنصف راتب اسمي مع استقطاع 10% توقيفات تقاعدية لحساب صندوق التقاعد',
   },
 
   // 4. الإيفادات والمهام الميدانية
@@ -597,9 +621,39 @@ export function AddMovementModal({
       // 1. Save Attendance Log
       await saveAttendanceLogsBatch([newRecord]);
 
-      // 2. If it deducts from employee annual leave balance, update employee
+      // 2. If it is an official Iraqi Law 5-Year Leave, update employee status and career timeline
       let updatedEmp: Employee | undefined = undefined;
-      if (deductFromBalance && currentEmp) {
+      if (
+        (selectedMovement.leaveType === 'five_year_full' ||
+          selectedMovement.leaveType === 'five_year_half') &&
+        currentEmp
+      ) {
+        const salaryType =
+          selectedMovement.leaveType === 'five_year_full'
+            ? 'full_base_salary'
+            : 'half_base_salary';
+        const fiveYearEnd =
+          hasEndDate && endDate
+            ? endDate
+            : (() => {
+                const d = new Date(logDate);
+                d.setFullYear(d.getFullYear() + 5);
+                return d.toISOString().slice(0, 10);
+              })();
+
+        const grantedEmp = await employeeService.grantFiveYearLeave(currentEmp.id, {
+          salaryType,
+          startDate: logDate,
+          endDate: fiveYearEnd,
+          orderNumber: orderNumber.trim() || `إج5-2026-${Math.floor(100 + Math.random() * 900)}`,
+          orderDate: orderDate || logDate,
+          baseSalary: currentEmp.baseSalary || 500000,
+          pensionDeductionPercent: 10,
+          notes: notes.trim() || undefined,
+          performedBy: currentUser?.fullName || 'مسؤول الحركات والدوام',
+        });
+        updatedEmp = grantedEmp;
+      } else if (deductFromBalance && currentEmp) {
         const daysToDeduct = daysCount;
         const newRemaining = Math.max(0, currentEmp.remainingBalance - daysToDeduct);
         const newUsed = currentEmp.usedBalance + daysToDeduct;
@@ -616,11 +670,8 @@ export function AddMovementModal({
 
       setSuccessNotice(`تم تسجيل حركة (${selectedMovement.title}) للموظف ${currentEmp.fullName} بنجاح.`);
       onRecordSaved(newRecord, updatedEmp);
-
-      setTimeout(() => {
-        setIsSaving(false);
-        onClose();
-      }, 700);
+      setIsSaving(false);
+      onClose();
     } catch (err) {
       console.error('Error saving movement record:', err);
       setIsSaving(false);
@@ -628,10 +679,22 @@ export function AddMovementModal({
   };
 
   if (!isOpen) return null;
+  if (typeof document === 'undefined') return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-md overflow-y-auto">
-      <div className="relative w-full max-w-3xl my-6 bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+  return createPortal(
+    <div
+      id="movement-modal-backdrop"
+      className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto animate-in fade-in duration-150"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSaving) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        className="relative w-full max-w-3xl my-auto bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-150"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="px-6 py-4 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -1273,6 +1336,62 @@ export function AddMovementModal({
             </div>
           </div>
 
+          {/* Special 5-Year Leave Iraqi Law Card */}
+          {(selectedMovement.leaveType === 'five_year_full' ||
+            selectedMovement.leaveType === 'five_year_half') && (
+            <div className="p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs text-indigo-900 dark:text-indigo-200 flex items-center gap-2">
+                  <Briefcase className="w-4 h-4 text-indigo-600" />
+                  <span>ضوابط واحتساب إجازة الـ 5 سنوات وفق القانون العراقي</span>
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-mono">
+                  5 سنوات = 1826 يوماً
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                  <div className="text-[10px] text-slate-500">نوع الراتب:</div>
+                  <div className="font-black text-indigo-900 dark:text-indigo-200">
+                    {selectedMovement.leaveType === 'five_year_full' ? 'راتب اسمي كامل (100%)' : 'نصف راتب اسمي (50%)'}
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                  <div className="text-[10px] text-slate-500">الراتب الاسمي المعتمد:</div>
+                  <div className="font-black font-mono text-slate-800 dark:text-slate-100">
+                    {(currentEmp?.baseSalary || 500000).toLocaleString('en-US')} د.ع
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                  <div className="text-[10px] text-slate-500">التوقيفات التقاعدية (10%):</div>
+                  <div className="font-black font-mono text-rose-600 dark:text-rose-400">
+                    -{Math.round(((currentEmp?.baseSalary || 500000) * 0.1)).toLocaleString('en-US')} د.ع
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-900/60">
+                  <div className="text-[10px] text-slate-500">الصافي الشهري المستلم:</div>
+                  <div className="font-black font-mono text-emerald-600 dark:text-emerald-400">
+                    {(
+                      (selectedMovement.leaveType === 'five_year_full'
+                        ? (currentEmp?.baseSalary || 500000)
+                        : Math.round((currentEmp?.baseSalary || 500000) / 2)) -
+                      Math.round((currentEmp?.baseSalary || 500000) * 0.1)
+                    ).toLocaleString('en-US')}{' '}
+                    د.ع
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-indigo-800 dark:text-indigo-300 leading-relaxed">
+                * عند حفظ هذه الإجازة، سيتم تلقائياً تحديث حالة الموظف في النظام إلى «متمتع بإجازة 5 سنوات» وتوثيق الاستحقاق في سجل مساره المهني، مع إمكانية تعديل الشروط أو قطع الإجازة مستقبلاً عند صدور أمر المباشرة.
+              </p>
+            </div>
+          )}
+
           {/* 5. Administrative Documentation & Notes */}
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-3">
             <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
@@ -1378,6 +1497,7 @@ export function AddMovementModal({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
