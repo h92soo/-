@@ -35,9 +35,9 @@ export const BiometricPingModal: React.FC<BiometricPingModalProps> = ({
     setIsRunning(true);
     setResult(null);
     setPingLog([
-      `بدء الفحص الحقيقي للاتصال والمنفذ (Real Hardware & Socket Ping) للجهاز: [${device.name}]`,
-      `معرف الجهاز: #${device.id} | الهدف: ${device.ipAddress}:${device.port} (طريقة الاتصال: ${device.connectionType})`,
-      'جارٍ إرسال حزم الاختبار الحقيقية 1 إلى 4 وفحص استجابة المنفذ بدون أي محاكاة...',
+      `بدء فحص الاتصال المباشر بالجهاز: [${device.name}]`,
+      `معرّف الجهاز: #${device.id} | العنوان: ${device.ipAddress}:${device.port}`,
+      'جارٍ فحص استجابة الجهاز عبر الشبكة وإرسال حزم الاختبار...',
     ]);
 
     try {
@@ -83,14 +83,14 @@ export const BiometricPingModal: React.FC<BiometricPingModalProps> = ({
       if (isSuccess) {
         setPingLog((prev) => [
           ...prev,
-          `✅ المنفذ [${device.port}] مفتوح ويستجيب بنجاح. الاتصال حقيقي ومتوافق.`,
-          `إحصائيات الفحص: 4 حزم أرسلت، ${packetsReceived} استلمت، ${packetLossPercent}% فقدان. متوسط الاستجابة: ${avgLatency}ms.`,
+          `✅ المنفذ [${device.port}] مفتوح ويستجيب بنجاح. تم تأكيد اتصال الجهاز بالمنظومة.`,
+          `إحصائيات الفحص: 4 حزم أرسلت، ${packetsReceived} استلمت بنجاح، ${packetLossPercent}% نسبة الفقدان. زمن الاستجابة: ${avgLatency} ملي ثانية.`,
         ]);
       } else {
         setPingLog((prev) => [
           ...prev,
-          `❌ خطأ اتصال حقيقي: لم يستجب الجهاز على العنوان (${device.ipAddress}:${device.port}).`,
-          `إحصائيات الفحص: 4 حزم أرسلت، 0 استلمت، 100% فقدان حزم (Packet Loss). الجهاز مغلق أو غير موصول.`,
+          `❌ تعذر الاتصال: لم يستجب الجهاز على العنوان (${device.ipAddress}:${device.port}).`,
+          `إحصائيات الفحص: 4 حزم أرسلت، 0 استلمت، 100% نسبة الفقدان. الجهاز مغلق أو الكابل غير متصل.`,
         ]);
       }
 

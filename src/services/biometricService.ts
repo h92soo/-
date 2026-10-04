@@ -535,13 +535,21 @@ class BiometricService {
     };
   }> {
     const devices = await this.getDevices();
-    const device =
+    const device: BiometricDevice =
       devices.find((d) => d.id === targetDeviceId) ||
       devices[0] || {
         id: 'DEV-USB-IMPORT',
         name: `ملف فلاش ميموري (${fileName})`,
+        model: 'Universal Flash Import',
+        brand: 'universal_usb',
         deviceType: 'multi_biometric',
-        ipAddress: 'USB-FILE',
+        ipAddress: '127.0.0.1',
+        port: 4370,
+        connectionType: 'usb_direct',
+        status: 'online',
+        location: 'منفذ USB مكتبي',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       };
 
     const lines = fileContent.split(/\r?\n/).filter((l) => l.trim().length > 0);

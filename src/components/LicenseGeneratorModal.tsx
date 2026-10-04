@@ -96,7 +96,7 @@ export const LicenseGeneratorModal: React.FC<LicenseGeneratorModalProps> = ({
       setIsAuthenticated(true);
       toast.success('تم تسجيل الدخول إلى لوحة المالك ومولد التراخيص بنجاح');
     } else {
-      setPinError('رمز المشرف/المالك غير صحيح! (الافتراضي: SAsa12589)');
+      setPinError('رمز المشرف/المالك غير صحيح!');
     }
   };
 
@@ -230,7 +230,7 @@ export const LicenseGeneratorModal: React.FC<LicenseGeneratorModalProps> = ({
                     required
                     value={masterPin}
                     onChange={(e) => setMasterPin(e.target.value)}
-                    placeholder="أدخل رمز المطور (الافتراضي: SAsa12589)"
+                    placeholder="أدخل الرمز السري للتحقق..."
                     className="w-full px-4 py-2.5 rounded-xl text-center text-sm font-mono tracking-widest bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                   {pinError && (

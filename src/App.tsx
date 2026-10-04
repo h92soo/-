@@ -42,6 +42,7 @@ import {
   Briefcase,
   TrendingUp,
   Bell,
+  Sparkles,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GovernmentEmblem } from './components/GovernmentEmblem';
@@ -97,23 +98,30 @@ import {
   getSystemUsers,
 } from './db/indexedDB';
 
-// Pre-configured government accounts for instant demonstration
+// Pre-configured accounts for Directorate of Water Resources
 const PRESET_ACCOUNTS: (UserAccount & { passwordHint: string })[] = [
   {
     username: 'admin',
-    passwordHint: 'SAsa12589',
-    fullName: 'المهندس المشرف العام',
-    jobTitle: 'مدير النظام المركزي وشؤون الموظفين',
-    department: 'شعبة تكنولوجيا المعلومات والموارد البشرية',
-    role: 'super_admin',
-    roleTitleAr: 'مدير النظام (صلاحيات كاملة)',
-    avatarColor: 'from-amber-500 to-amber-700',
+    passwordHint: 'admin',
+    fullName: 'مسؤول استخدام النظام',
+    jobTitle: 'مشغل المنظومة ومسؤول إدارة الدوام والموظفين',
+    department: 'دائرة الموارد المائية - قسم إدارة الموارد البشرية',
+    role: 'hr_director',
+    roleTitleAr: 'مسؤول استخدام النظام (شؤون الموظفين والدوام)',
+    avatarColor: 'from-amber-600 to-amber-800',
     permissions: {
       canEditAttendance: true,
       canApproveLeaves: true,
       canDeleteRecords: true,
       canGenerateReports: true,
       canAccessMasterSettings: true,
+      canEditSalaries: true,
+      canUpdateSystemSettings: true,
+      canToggleFeatures: true,
+      canGrantFiveYearLeave: true,
+      canManageCareerRules: true,
+      canExportDatabase: true,
+      canManageSystemUsers: true,
     },
   },
   {
@@ -121,10 +129,10 @@ const PRESET_ACCOUNTS: (UserAccount & { passwordHint: string })[] = [
     passwordHint: 'HrAdmin2026',
     fullName: 'أ. علي عبد الرحمن الحيدري',
     jobTitle: 'مدير قسم الموارد البشرية والخدمة المدنية',
-    department: 'قسم إدارة الموارد البشرية',
+    department: 'دائرة الموارد المائية - قسم إدارة الموارد البشرية',
     role: 'hr_director',
-    roleTitleAr: 'مسؤول شؤون الموظفين',
-    avatarColor: 'from-emerald-500 to-teal-700',
+    roleTitleAr: 'مسؤول شؤون الموظفين والخدمة',
+    avatarColor: 'from-emerald-600 to-teal-800',
     permissions: {
       canEditAttendance: true,
       canApproveLeaves: true,
@@ -137,11 +145,11 @@ const PRESET_ACCOUNTS: (UserAccount & { passwordHint: string })[] = [
     username: 'clerk_ali',
     passwordHint: 'Clerk2026',
     fullName: 'أحمد جاسم الشمري',
-    jobTitle: 'معاون ملاحظ إداري - مدخل بيانات الدوام',
-    department: 'شعبة الحضور والإجازات',
+    jobTitle: 'معاون ملاحظ إداري - مدخل بيانات الدوام الميداني',
+    department: 'دائرة الموارد المائية - شعبة الحضور والإجازات',
     role: 'attendance_officer',
     roleTitleAr: 'مدخل بيانات الحضور',
-    avatarColor: 'from-blue-500 to-indigo-700',
+    avatarColor: 'from-blue-600 to-indigo-800',
     permissions: {
       canEditAttendance: true,
       canApproveLeaves: false,
@@ -169,9 +177,9 @@ export type WorkspaceTab =
   | 'analytics';
 
 const DEFAULT_ORGANIZATION: OrganizationSettings = {
-  ministryName: 'وزارة التعليم العالي والبحث العلمي',
-  directorateName: 'دائرة الشؤون الإدارية والمالية',
-  departmentName: 'قسم إدارة الموارد البشرية والخدمة المدنية',
+  ministryName: 'جمهورية العراق - وزارة الموارد المائية',
+  directorateName: 'دائرة الموارد المائية',
+  departmentName: 'قسم إدارة الموارد البشرية وشؤون الموظفين والتشغيل',
   officialEmblem: 'golden_eagle' as any,
   operatingYear: 2026,
 };
@@ -395,16 +403,16 @@ export default function App() {
           u.isActive !== false
       );
 
-      // 2. فحص الحسابات الافتراضية
+      // 2. فحص الحسابات المعتمدة
       const matchedPreset = PRESET_ACCOUNTS.find(
         (acc) =>
           acc.username.toLowerCase() === trimmedUser.toLowerCase() &&
-          acc.passwordHint === trimmedPass
+          (acc.passwordHint === trimmedPass || (acc.username === 'admin' && (trimmedPass === 'admin' || trimmedPass === 'SAsa12589')))
       );
 
-      // 3. المشرف الرئيسي (Admin)
+      // 3. مستخدم النظام الرئيسي (admin / admin)
       const isMasterAdmin =
-        trimmedUser.toLowerCase() === 'admin' && trimmedPass === 'SAsa12589';
+        trimmedUser.toLowerCase() === 'admin' && (trimmedPass === 'admin' || trimmedPass === 'SAsa12589');
 
       setTimeout(() => {
         if (matchedDbUser) {
@@ -539,15 +547,31 @@ export default function App() {
                   <GovernmentEmblem size="md" className="mb-3" />
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/20 mb-1.5">
                     <ShieldCheck className="w-3 h-3" />
-                    بوابة الدخول الحكومية الآمنة
+                    بوابة الدخول الرسمية المعتمدة
                   </span>
                   <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                    المنهج الرقمي للإدارة الحكومية
+                    وزارة الموارد المائية
                   </h1>
-                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-                    نظام إدارة شؤون الموظفين والحضور والغياب للدوائر والمؤسسات
+                  <h2 className="text-sm sm:text-base font-bold text-amber-600 dark:text-amber-400 mt-0.5">
+                    دائرة الموارد المائية
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    نظام إدارة شؤون الموظفين والحضور والغياب وأجهزة البصمة
                   </p>
                 </div>
+
+                {/* Trial Mode Notification Badge */}
+                {licenseStatus?.isTrial && (
+                  <div className="mb-4 px-3.5 py-2.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between text-xs text-amber-800 dark:text-amber-300">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span className="font-bold">فترة تجريبية معتمدة — دائرة الموارد المائية</span>
+                    </div>
+                    <span className="bg-amber-500/20 px-2 py-0.5 rounded-full font-bold text-[11px]">
+                      {licenseStatus.trialDaysRemaining} يوماً
+                    </span>
+                  </div>
+                )}
 
                 {/* Error Alert Box */}
                 {errorMessage && (
@@ -695,11 +719,6 @@ export default function App() {
                   <span>تثبيت أو تشغيل كتطبيق سطح مكتب Windows (exe.)</span>
                 </button>
               </div>
-
-              {/* IndexedDB Local Persistence Tester Card */}
-              <div className="mt-4">
-                <IndexedDBTester compact onEmployeeDataChanged={handleReloadAllData} />
-              </div>
             </motion.div>
           ) : (
             /* Logged-in Desktop Workspace with Right Sidebar Navigation (Apple macOS Style) */
@@ -729,26 +748,26 @@ export default function App() {
                         ع
                       </div>
                       <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
-                        المنهج الرقمي للإدارة الحكومية
+                        دائرة الموارد المائية
                       </span>
                       <span className="text-[10px] text-slate-400 dark:text-slate-500">
                         /
                       </span>
                       <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                         {activeWorkspaceTab === 'dashboard' && 'لوحة التحكم والعمليات المركزية'}
-                        {activeWorkspaceTab === 'employees' && 'إدارة شؤون الموظفين'}
+                        {activeWorkspaceTab === 'employees' && 'إدارة شؤون موظفي الموارد المائية'}
                         {activeWorkspaceTab === 'daily_movements' && 'مركز الحركات اليومية الفورية والتقارير'}
                         {activeWorkspaceTab === 'reports' && 'تقارير الدوام والشيت السنوي'}
                         {activeWorkspaceTab === 'movement_designer' && 'المخطط البياني ومصمم تقارير الحركات'}
-                        {activeWorkspaceTab === 'analytics' && 'الرسوم البيانية التفاعلية للموظفين (Recharts)'}
-                        {activeWorkspaceTab === 'calendar' && 'التقويم السنوي والعطل الرسمية والمناسبات (رئاسة الوزراء)'}
-                        {activeWorkspaceTab === 'barcode_hub' && 'منظومة أجهزة البصمة الذكية والبطاقات الموحدة'}
+                        {activeWorkspaceTab === 'analytics' && 'التحليلات والمؤشرات البيانية للكوادر'}
+                        {activeWorkspaceTab === 'calendar' && 'التقويم السنوي والعطل الرسمية (رئاسة الوزراء)'}
+                        {activeWorkspaceTab === 'barcode_hub' && 'منظومة أجهزة البصمة الذكية والربط الشبكي'}
                         {activeWorkspaceTab === 'allow_promotions' && 'العلاوات السنوية والترفيعات الوظيفية'}
                         {activeWorkspaceTab === 'retirement' && 'هيئة وشؤون التقاعد (السن القانوني 60)'}
-                        {activeWorkspaceTab === 'settings' && 'لوحة الإعدادات وقواعد الدوام والصلاحيات'}
-                        {activeWorkspaceTab === 'profile' && 'بيانات المستخدم النشط ومصفوفة الصلاحيات'}
-                        {activeWorkspaceTab === 'db_test' && 'فحص قاعدة بيانات IndexedDB المحلية'}
-                        {activeWorkspaceTab === 'backup' && 'النسخ الاحتياطي والأمان ومزامنة السحابة'}
+                        {activeWorkspaceTab === 'settings' && 'لوحة إعدادات المنظومة وقواعد الدوام'}
+                        {activeWorkspaceTab === 'profile' && 'بيانات المستخدم ومسؤوليات استخدام النظام'}
+                        {activeWorkspaceTab === 'db_test' && 'إدارة البيانات المحلية'}
+                        {activeWorkspaceTab === 'backup' && 'النسخ الاحتياطي والأمان وحفظ السجلات'}
                       </span>
                     </div>
                   </div>
@@ -1212,7 +1231,7 @@ export default function App() {
                                   <TrendingUp className="w-4 h-4" />
                                 </div>
                                 <div>
-                                  <div className="text-xs font-bold">الرسوم البيانية التفاعلية</div>
+                                  <div className="text-xs font-bold">الرسوم والمؤشرات البيانية</div>
                                   <div
                                     className={`text-[10px] ${
                                       activeWorkspaceTab === 'analytics'
@@ -1231,7 +1250,7 @@ export default function App() {
                                     : 'bg-cyan-950 text-cyan-300 border border-cyan-800/60'
                                 }`}
                               >
-                                Recharts 📈
+                                مؤشرات 📊
                               </span>
                             </button>
 
@@ -1507,7 +1526,7 @@ export default function App() {
                                   <ShieldCheck className="w-4 h-4" />
                                 </div>
                                 <div>
-                                  <div className="text-xs font-bold">المستخدم والصلاحيات</div>
+                                  <div className="text-xs font-bold">المستخدم والمسؤوليات</div>
                                   <div
                                     className={`text-[10px] ${
                                       activeWorkspaceTab === 'profile'
@@ -1515,43 +1534,7 @@ export default function App() {
                                         : 'text-slate-400'
                                     }`}
                                   >
-                                    بطاقة الحساب ومصفوفة RBAC
-                                  </div>
-                                </div>
-                              </div>
-                            </button>
-
-                            {/* 7. IndexedDB Storage Tester */}
-                            <button
-                              type="button"
-                              id="nav-dbtest-btn"
-                              onClick={() => setActiveWorkspaceTab('db_test')}
-                              className={`w-full text-right p-2.5 rounded-2xl transition-all cursor-pointer flex items-center justify-between group ${
-                                activeWorkspaceTab === 'db_test'
-                                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/25 font-semibold'
-                                  : 'text-slate-300 hover:bg-slate-900 hover:text-white'
-                              }`}
-                            >
-                              <div className="flex items-center gap-3">
-                                <div
-                                  className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
-                                    activeWorkspaceTab === 'db_test'
-                                      ? 'bg-white/20 text-white'
-                                      : 'bg-blue-500/20 text-blue-400 group-hover:bg-blue-500/30'
-                                  }`}
-                                >
-                                  <Database className="w-4 h-4" />
-                                </div>
-                                <div>
-                                  <div className="text-xs font-bold">فحص IndexedDB</div>
-                                  <div
-                                    className={`text-[10px] ${
-                                      activeWorkspaceTab === 'db_test'
-                                        ? 'text-blue-100'
-                                        : 'text-slate-400'
-                                    }`}
-                                  >
-                                    فحص التخزين المحلي بدون إنترنت
+                                    مسؤوليات استخدام النظام ومصفوفة العمل
                                   </div>
                                 </div>
                               </div>

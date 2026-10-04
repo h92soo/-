@@ -94,14 +94,14 @@ const INITIAL_DEFAULT_USERS: SystemUserAccount[] = [
   {
     id: 'USR-001',
     username: 'admin',
-    fullName: 'المهندس حسين عبد المنذر',
-    jobTitle: 'مشرف النظام المركزي ومطور المنظومة',
-    department: 'الإدارة المركزية والدعم الفني',
-    role: 'super_admin',
-    roleTitleAr: 'مشرف النظام المركزي (Super Admin)',
+    fullName: 'مسؤول استخدام النظام',
+    jobTitle: 'مشغل المنظومة ومسؤول إدارة الدوام والموظفين',
+    department: 'دائرة الموارد المائية - قسم إدارة الموارد البشرية',
+    role: 'hr_director',
+    roleTitleAr: 'مسؤول استخدام النظام (شؤون الموظفين والدوام)',
     avatarColor: 'amber',
     isActive: true,
-    passwordHash: 'SAsa12589',
+    passwordHash: 'admin',
     createdAt: '2026-01-01',
     permissions: {
       canEditAttendance: true,
@@ -317,9 +317,9 @@ export function SettingsPanel({
   // Organization identity form state
   const [orgForm, setOrgForm] = useState<OrganizationSettings>(() => {
     return organization || {
-      ministryName: 'وزارة التعليم العالي والبحث العلمي',
-      directorateName: 'دائرة الشؤون الإدارية والمالية',
-      departmentName: 'قسم إدارة الموارد البشرية والخدمة المدنية',
+      ministryName: 'جمهورية العراق - وزارة الموارد المائية',
+      directorateName: 'دائرة الموارد المائية',
+      departmentName: 'قسم الشؤون الإدارية والمالية - شعبة الموارد البشرية',
       officialEmblem: 'golden_eagle',
       operatingYear: 2026,
     };
@@ -348,12 +348,13 @@ export function SettingsPanel({
 
   const handleUnlockMaster = (e: React.FormEvent) => {
     e.preventDefault();
-    if (masterPasswordInput.trim() === 'SAsa12589') {
+    if (masterPasswordInput.trim() === 'admin' || masterPasswordInput.trim() === 'SAsa12589') {
       setIsMasterUnlocked(true);
       sessionStorage.setItem('admin_master_unlocked', 'true');
       setPasswordError('');
+      toast.success('تم فك قفل الإعدادات بنجاح');
     } else {
-      setPasswordError('كلمة المرور غير صحيحة! يرجى إدخال رمز المرور الإداري المعتمد: SAsa12589');
+      setPasswordError('كلمة المرور غير صحيحة! يرجى إدخال كلمة مرور النظام المعتمدة.');
     }
   };
 
@@ -643,27 +644,27 @@ export function SettingsPanel({
         </div>
         <div>
           <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center justify-center gap-2">
-            <span>لوحة الإعدادات الإدارية العليا</span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300 font-mono font-bold">
+            <span>لوحة إعدادات المنظومة</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-bold">
               محمية بكلمة المرور
             </span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
-            واجهة إعدادات النظام الديناميكية محمية برمز المرور الإداري المعتمد لضمان سلامة تخصيص هوية الوزارة وقواعد الأرصدة.
+            واجهة إعدادات المنظومة محمية بكلمة المرور لضمان سلامة ضبط هوية الدائرة وقواعد الدوام.
           </p>
         </div>
 
         <form onSubmit={handleUnlockMaster} className="space-y-4 text-right">
           <div>
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-              كلمة المرور المركزية (SAsa12589):
+              كلمة مرور النظام:
             </label>
             <div className="relative">
               <input
                 type={showMasterPassword ? 'text' : 'password'}
                 value={masterPasswordInput}
                 onChange={(e) => setMasterPasswordInput(e.target.value)}
-                placeholder="أدخل رمز المرور المركزي..."
+                placeholder="أدخل كلمة مرور النظام..."
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-amber-500 text-center"
                 autoFocus
               />
@@ -805,139 +806,200 @@ export function SettingsPanel({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold text-slate-900 dark:text-white">
-                لوحة الإعدادات والصلاحيات المركزية
+                إعدادات منظومة الموارد المائية
               </h1>
-              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-mono font-bold">
-                2026 OFFICIAL
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 font-bold">
+                دائرة الموارد المائية
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              تخصيص هوية الوزارة والشعار، قواعد الأرصدة والزمنيات، المستخدمين ومصفوفة RBAC، والتحكم بمظهر الواجهة
+              تخصيص هوية الدائرة والشعار الرسمي، قواعد الدوام والأرصدة، مستخدمو النظام، وحفظ البيانات
             </p>
           </div>
         </div>
+      </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex flex-wrap items-center gap-1 p-1 rounded-2xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700/60 text-xs">
+      {/* Categorized Settings Navigation Tabs */}
+      <div className="p-3 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs space-y-3">
+        <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 px-1 flex items-center justify-between">
+          <span>أقسام وميزات المنظومة:</span>
+          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">اختر القسم للتعديل المباشر</span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+          {/* Section 1: Official Identity */}
           <button
             type="button"
             onClick={() => setActiveTab('org_identity')}
-            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            className={`p-2.5 rounded-2xl text-right transition-all cursor-pointer flex flex-col gap-1 border ${
               activeTab === 'org_identity'
-                ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-amber-500 text-white border-amber-600 shadow-md shadow-amber-500/20'
+                : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-amber-400'
             }`}
           >
-            <Building2 className="w-4 h-4 text-amber-500" />
-            <span>هوية الوزارة والشعار</span>
+            <div className="flex items-center gap-2">
+              <Building2 className={`w-4 h-4 ${activeTab === 'org_identity' ? 'text-white' : 'text-amber-500'}`} />
+              <span className="text-xs font-bold">هوية الدائرة والشعار</span>
+            </div>
+            <span className={`text-[10px] ${activeTab === 'org_identity' ? 'text-amber-100' : 'text-slate-400'}`}>
+              الوزارة والدائرة والترويسة
+            </span>
           </button>
 
+          {/* Section 2: Employment Types */}
           <button
             type="button"
             id="tab-employment-labels-btn"
             onClick={() => setActiveTab('employment_labels')}
-            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            className={`p-2.5 rounded-2xl text-right transition-all cursor-pointer flex flex-col gap-1 border ${
               activeTab === 'employment_labels'
-                ? 'bg-white dark:bg-slate-800 text-violet-700 dark:text-violet-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-violet-600 text-white border-violet-700 shadow-md shadow-violet-600/20'
+                : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-violet-400'
             }`}
           >
-            <Briefcase className="w-4 h-4 text-violet-500" />
-            <span>تخصيص المسميات الوظيفية</span>
+            <div className="flex items-center gap-2">
+              <Briefcase className={`w-4 h-4 ${activeTab === 'employment_labels' ? 'text-white' : 'text-violet-500'}`} />
+              <span className="text-xs font-bold">المسميات وصيغ التعاقد</span>
+            </div>
+            <span className={`text-[10px] ${activeTab === 'employment_labels' ? 'text-violet-100' : 'text-slate-400'}`}>
+              ملاك، عقود 315، وأجور
+            </span>
           </button>
 
+          {/* Section 3: Leave & Attendance Rules */}
           <button
             type="button"
             onClick={() => setActiveTab('leave_rules')}
-            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            className={`p-2.5 rounded-2xl text-right transition-all cursor-pointer flex flex-col gap-1 border ${
               activeTab === 'leave_rules'
-                ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white border-emerald-700 shadow-md shadow-emerald-600/20'
+                : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-emerald-400'
             }`}
           >
-            <Calendar className="w-4 h-4 text-amber-500" />
-            <span>قواعد الأرصدة والزمنيات</span>
+            <div className="flex items-center gap-2">
+              <Calendar className={`w-4 h-4 ${activeTab === 'leave_rules' ? 'text-white' : 'text-emerald-500'}`} />
+              <span className="text-xs font-bold">قواعد الأرصدة والدوام</span>
+            </div>
+            <span className={`text-[10px] ${activeTab === 'leave_rules' ? 'text-emerald-100' : 'text-slate-400'}`}>
+              الزمنيات، الإجازات، والغياب
+            </span>
           </button>
 
+          {/* Section 4: Promotions & Retirement */}
           <button
             type="button"
             onClick={() => setActiveTab('career_rules')}
-            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            className={`p-2.5 rounded-2xl text-right transition-all cursor-pointer flex flex-col gap-1 border ${
               activeTab === 'career_rules'
-                ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-amber-600 text-white border-amber-700 shadow-md shadow-amber-600/20'
+                : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-amber-400'
             }`}
           >
-            <Award className="w-4 h-4 text-amber-500" />
-            <span>العلاوات والترفيع والتقاعد</span>
+            <div className="flex items-center gap-2">
+              <Award className={`w-4 h-4 ${activeTab === 'career_rules' ? 'text-white' : 'text-amber-500'}`} />
+              <span className="text-xs font-bold">العلاوات والتقاعد</span>
+            </div>
+            <span className={`text-[10px] ${activeTab === 'career_rules' ? 'text-amber-100' : 'text-slate-400'}`}>
+              السن القانوني 60 والترقيات
+            </span>
           </button>
 
+          {/* Section 5: Users & Operational Responsibilities */}
           <button
             type="button"
             onClick={() => setActiveTab('users_rbac')}
-            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            className={`p-2.5 rounded-2xl text-right transition-all cursor-pointer flex flex-col gap-1 border ${
               activeTab === 'users_rbac'
-                ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-blue-600 text-white border-blue-700 shadow-md shadow-blue-600/20'
+                : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-blue-400'
             }`}
           >
-            <Shield className="w-4 h-4 text-emerald-500" />
-            <span>المستخدمين والصلاحيات ({users.length})</span>
+            <div className="flex items-center gap-2">
+              <Shield className={`w-4 h-4 ${activeTab === 'users_rbac' ? 'text-white' : 'text-blue-500'}`} />
+              <span className="text-xs font-bold">المستخدمين ومسؤوليات العمل</span>
+            </div>
+            <span className={`text-[10px] ${activeTab === 'users_rbac' ? 'text-blue-100' : 'text-slate-400'}`}>
+              حسابات الموظفين والمهام ({users.length})
+            </span>
           </button>
 
+          {/* Section 6: System Features */}
           <button
             type="button"
             id="tab-system-features-btn"
             onClick={() => setActiveTab('system_features')}
-            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            className={`p-2.5 rounded-2xl text-right transition-all cursor-pointer flex flex-col gap-1 border ${
               activeTab === 'system_features'
-                ? 'bg-white dark:bg-slate-800 text-indigo-700 dark:text-indigo-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-indigo-600 text-white border-indigo-700 shadow-md shadow-indigo-600/20'
+                : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-indigo-400'
             }`}
           >
-            <Sliders className="w-4 h-4 text-indigo-500" />
-            <span>التحكم بميزات ووحدات المنظومة</span>
+            <div className="flex items-center gap-2">
+              <Sliders className={`w-4 h-4 ${activeTab === 'system_features' ? 'text-white' : 'text-indigo-500'}`} />
+              <span className="text-xs font-bold">ميزات ووحدات المنظومة</span>
+            </div>
+            <span className={`text-[10px] ${activeTab === 'system_features' ? 'text-indigo-100' : 'text-slate-400'}`}>
+              تفعيل وتعطيل الميزات الميدانية
+            </span>
           </button>
 
+          {/* Section 7: Appearance */}
           <button
             type="button"
             onClick={() => setActiveTab('appearance')}
-            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            className={`p-2.5 rounded-2xl text-right transition-all cursor-pointer flex flex-col gap-1 border ${
               activeTab === 'appearance'
-                ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-sky-600 text-white border-sky-700 shadow-md shadow-sky-600/20'
+                : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-sky-400'
             }`}
           >
-            <Palette className="w-4 h-4 text-blue-500" />
-            <span>التحكم بالمظهر والعرض</span>
+            <div className="flex items-center gap-2">
+              <Palette className={`w-4 h-4 ${activeTab === 'appearance' ? 'text-white' : 'text-sky-500'}`} />
+              <span className="text-xs font-bold">المظهر والعرض المكتبي</span>
+            </div>
+            <span className={`text-[10px] ${activeTab === 'appearance' ? 'text-sky-100' : 'text-slate-400'}`}>
+              الخطوط، الألوان، وحجم النص
+            </span>
           </button>
 
+          {/* Section 8: Backup & Security */}
           <button
             type="button"
             id="tab-backup-restore-btn"
             onClick={() => setActiveTab('backup_restore')}
-            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            className={`p-2.5 rounded-2xl text-right transition-all cursor-pointer flex flex-col gap-1 border ${
               activeTab === 'backup_restore'
-                ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-teal-600 text-white border-teal-700 shadow-md shadow-teal-600/20'
+                : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-teal-400'
             }`}
           >
-            <Database className="w-4 h-4 text-indigo-500" />
-            <span>النسخ الاحتياطي والأمان</span>
+            <div className="flex items-center gap-2">
+              <Database className={`w-4 h-4 ${activeTab === 'backup_restore' ? 'text-white' : 'text-teal-500'}`} />
+              <span className="text-xs font-bold">النسخ الاحتياطي والأمان</span>
+            </div>
+            <span className={`text-[10px] ${activeTab === 'backup_restore' ? 'text-teal-100' : 'text-slate-400'}`}>
+              حفظ واستعادة قاعدة البيانات
+            </span>
           </button>
 
+          {/* Section 9: Commercial License & Trial */}
           <button
             type="button"
             id="tab-commercial-license-btn"
             onClick={() => setActiveTab('commercial_license')}
-            className={`px-3 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 ${
+            className={`p-2.5 rounded-2xl text-right transition-all cursor-pointer flex flex-col gap-1 border sm:col-span-2 lg:col-span-2 ${
               activeTab === 'commercial_license'
-                ? 'bg-white dark:bg-slate-800 text-amber-700 dark:text-amber-300 shadow-xs'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                ? 'bg-amber-600 text-white border-amber-700 shadow-md shadow-amber-600/20'
+                : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-amber-400'
             }`}
           >
-            <Key className="w-4 h-4 text-amber-500" />
-            <span>الترخيص التجاري ومولّد الأكواد ⚡</span>
+            <div className="flex items-center gap-2">
+              <Key className={`w-4 h-4 ${activeTab === 'commercial_license' ? 'text-white' : 'text-amber-500'}`} />
+              <span className="text-xs font-bold">ترخيص المنظومة والفترة التجريبية</span>
+            </div>
+            <span className={`text-[10px] ${activeTab === 'commercial_license' ? 'text-amber-100' : 'text-slate-400'}`}>
+              حالة التفعيل وترخيص دائرة الموارد المائية
+            </span>
           </button>
         </div>
       </div>
@@ -970,7 +1032,7 @@ export function SettingsPanel({
                   type="text"
                   value={orgForm.ministryName}
                   onChange={(e) => setOrgForm({ ...orgForm, ministryName: e.target.value })}
-                  placeholder="مثال: جمهورية العراق - وزارة التعليم العالي والبحث العلمي"
+                  placeholder="مثال: جمهورية العراق - وزارة الموارد المائية"
                   className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
                   required
                 />
@@ -984,7 +1046,7 @@ export function SettingsPanel({
                   type="text"
                   value={orgForm.directorateName}
                   onChange={(e) => setOrgForm({ ...orgForm, directorateName: e.target.value })}
-                  placeholder="مثال: دائرة الشؤون الإدارية والمالية"
+                  placeholder="مثال: دائرة الموارد المائية"
                   className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
                   required
                 />
@@ -998,7 +1060,7 @@ export function SettingsPanel({
                   type="text"
                   value={orgForm.departmentName}
                   onChange={(e) => setOrgForm({ ...orgForm, departmentName: e.target.value })}
-                  placeholder="مثال: قسم إدارة الموارد البشرية والخدمة المدنية"
+                  placeholder="مثال: قسم الشؤون الإدارية والمالية - شعبة الموارد البشرية"
                   className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
                 />
               </div>

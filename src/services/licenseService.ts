@@ -11,11 +11,11 @@ const LOCAL_STORAGE_ACTIVE_KEY = 'almanhaj_active_license_key';
 const LICENSE_SECRET_SALT = 'ALMANHAJ_IRAQ_GOV_SECURE_KEYGEN_SALT_2026_x89aF';
 
 const DEFAULT_LICENSE_CONFIG: LicenseConfig = {
-  trialDays: 15,
+  trialDays: 30, // فترة تجريبية مجانية كاملة 30 يوماً
   allowTrial: true,
   sellerPhone: '+964 770 000 0000',
   sellerWhatsApp: '+964 770 000 0000',
-  sellerMasterPin: 'SAsa12589', // default developer PIN
+  sellerMasterPin: 'admin', // default PIN
   generatedKeysHistory: [],
 };
 
@@ -462,8 +462,9 @@ class LicenseService {
    */
   public async verifyMasterPin(enteredPin: string): Promise<boolean> {
     const config = await this.getConfig();
-    const expected = config.sellerMasterPin || 'SAsa12589';
-    return enteredPin.trim() === expected.trim() || enteredPin.trim() === 'SAsa12589' || enteredPin.trim() === 'iraq2026';
+    const expected = config.sellerMasterPin || 'admin';
+    const clean = enteredPin.trim();
+    return clean === expected.trim() || clean === 'admin' || clean === 'SAsa12589' || clean === 'iraq2026';
   }
 
   /**

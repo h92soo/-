@@ -147,14 +147,15 @@ export interface Department {
 }
 
 export const DEFAULT_DEPARTMENTS: Department[] = [
-  { id: 'dept-hr', name: 'قسم الموارد البشرية والخدمة المدنية', code: 'HR', managerName: 'أ. د. عبد الله السعدي', color: 'indigo', description: 'إدارة شؤون الموظفين والملاك والعلاوات والترقيات والتقاعد' },
-  { id: 'dept-eng', name: 'قسم الشؤون الهندسية والمشاريع', code: 'ENG', managerName: 'م. حيدر جاسم الموسوي', color: 'amber', description: 'الإشراف الهندسي وتنفيذ المشاريع والمخططات العمرانية' },
-  { id: 'dept-leg', name: 'قسم الشؤون القانونية والإدارية', code: 'LEG', managerName: 'الحقوقي صباح كاظم', color: 'emerald', description: 'المشاورات القانونية واللجان التحقيقية وصياغة العقود' },
-  { id: 'dept-it', name: 'شعبة تكنولوجيا المعلومات والحاسبة', code: 'IT', managerName: 'م. أحمد خالد الفهد', color: 'blue', description: 'إدارة الأنظمة والبرمجيات وقواعد البيانات والشبكات' },
-  { id: 'dept-fin', name: 'قسم الشؤون المالية والرواتب', code: 'FIN', managerName: 'المحاسب عادل عبد الرضا', color: 'purple', description: 'إعداد قوائم الرواتب والموازنة والمحاسبة الحكومية' },
-  { id: 'dept-aud', name: 'قسم الرقابة والتدقيق الداخلي', code: 'AUD', managerName: 'د. وسام حميد كريم', color: 'rose', description: 'تدقيق المستندات والرواتب ومطابقة السجلات المالية' },
-  { id: 'dept-pr', name: 'قسم شؤون المواطنين والعلاقات', code: 'PR', managerName: 'السيدة إيمان فاضل', color: 'cyan', description: 'استقبال المراجعين ومتابعة الشكاوى والطلبات الرسمية' },
-  { id: 'dept-wh', name: 'قسم المخازن والتجهيزات', code: 'WH', managerName: 'السيد رائد سلمان', color: 'orange', description: 'إدارة الموجودات والأثاث والمخازن المركزية' },
+  { id: 'dept-hr', name: 'قسم الموارد البشرية والشؤون الإدارية', code: 'HR', managerName: 'أ. د. عبد الله السعدي', color: 'indigo', description: 'إدارة شؤون الموظفين والملاكات والعلاوات والترقيات والتقاعد والأوامر الإدارية' },
+  { id: 'dept-dams', name: 'قسم السدود والمشاريع والخزانات المائية', code: 'DAM', managerName: 'م. حيدر جاسم الموسوي', color: 'amber', description: 'متابعة مناسيب السدود والخزانات وتشغيل البوابات والمفيض والتحكم الإستراتيجي' },
+  { id: 'dept-irrigation', name: 'قسم شبكات الري والبزل واستصلاح الأراضي', code: 'IRR', managerName: 'م. أحمد مهدي الكرخي', color: 'emerald', description: 'إدارة وتوزيع الحصص المائية وصيانة القنوات والجداول والمشاريع الإروائية' },
+  { id: 'dept-groundwater', name: 'قسم إدارة المياه الجوفية والآبار والوديان', code: 'GW', managerName: 'الجيولوجي صباح كاظم', color: 'cyan', description: 'حفر وتراخيص الآبار ومراقبة الخزين الجوفي والسيول والوديان' },
+  { id: 'dept-dredging', name: 'شعبة الكري وتطهير مقاطع الأنهار وروافدها', code: 'DRG', managerName: 'م. وسام حميد كريم', color: 'blue', description: 'عمليات كري الترسبات الطينية وتوسيع مقاطع مجاري الأنهار ومحاربة نبات زهرة النيل' },
+  { id: 'dept-pumps', name: 'شعبة المحطات الكهروميكانيكية والمضخات', code: 'PMP', managerName: 'م. علي عبد الرضا المهداوي', color: 'orange', description: 'صيانة وتشغيل محطات الضخ الرئيسية ومحركات الديزل ولوحات السيطرة الكهربائية' },
+  { id: 'dept-gis', name: 'شعبة المساحة ونظم المعلومات الجغرافية والرصد', code: 'GIS', managerName: 'المهندسة إيمان فاضل', color: 'teal', description: 'الخرائط الهيدرولوجية والمسوحات الطبوغرافية ونظم الاستشعار عن بعد ومقاييس الجريان' },
+  { id: 'dept-fin', name: 'قسم الشؤون المالية والحسابات والتدقيق', code: 'FIN', managerName: 'المحاسب عادل عبد الزهرة', color: 'purple', description: 'إعداد قوائم الرواتب والموازنة والمحاسبة الحكومية والرقابة والتدقيق الداخلي' },
+  { id: 'dept-safety', name: 'شعبة السلامة المهنية والبيئة المائية والرقابة', code: 'SAF', managerName: 'السيد رائد سلمان التميمي', color: 'rose', description: 'تطبيق معايير السلامة المهنية ومراقبة نوعية المياه والتصدي للمخالفات والتجاوزات' },
 ];
 
 export interface Employee {
