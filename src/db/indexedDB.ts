@@ -23,11 +23,12 @@ import {
   BarcodeScanLog,
   CareerSystemSettings,
   DEFAULT_CAREER_SETTINGS,
+  ArchivedDocument,
 } from '../types';
 import { IRAQ_CABINET_HOLIDAYS_PRESET } from '../data/iraqHolidaysData';
 
 export const DB_NAME = 'GovPersonnelDB_2026';
-export const DB_VERSION = 3;
+export const DB_VERSION = 4;
 export const STORE_EMPLOYEES = 'employees';
 export const STORE_ATTENDANCE = 'attendance_sheets';
 export const STORE_SETTINGS = 'system_settings';
@@ -37,6 +38,7 @@ export const STORE_TIMELINE = 'career_timeline';
 export const STORE_ALLOWANCES = 'allowance_records';
 export const STORE_PROMOTIONS = 'promotion_records';
 export const STORE_BARCODE_LOGS = 'barcode_scan_logs';
+export const STORE_ARCHIVE = 'archived_documents';
 
 export const DEFAULT_LEAVE_RULES: LeaveRulesSettings = {
   permanentAnnualBalance: 36,
@@ -144,6 +146,17 @@ export function openGovDB(): Promise<IDBDatabase> {
         barcodeStore.createIndex('scanTime', 'scanTime', { unique: false });
         barcodeStore.createIndex('barcode', 'barcode', { unique: false });
         barcodeStore.createIndex('employeeId', 'employeeId', { unique: false });
+      }
+
+      // 10. جدول مستندات وأضابير الأرشفة الإلكترونية الشاملة (Archived Documents Store)
+      if (!db.objectStoreNames.contains(STORE_ARCHIVE)) {
+        const archiveStore = db.createObjectStore(STORE_ARCHIVE, { keyPath: 'id' });
+        archiveStore.createIndex('employeeId', 'employeeId', { unique: false });
+        archiveStore.createIndex('category', 'category', { unique: false });
+        archiveStore.createIndex('documentDate', 'documentDate', { unique: false });
+        archiveStore.createIndex('referenceNumber', 'referenceNumber', { unique: false });
+        archiveStore.createIndex('isHandwritten', 'isHandwritten', { unique: false });
+        archiveStore.createIndex('createdAt', 'createdAt', { unique: false });
       }
     };
 
@@ -1472,6 +1485,107 @@ export async function getBarcodeScanLogs(limit: number = 50): Promise<BarcodeSca
     };
     req.onerror = () => reject(new Error(`فشل استرجاع سجلات المسح: ${req.error?.message}`));
     tx.oncomplete = () => db.close();
+  });
+}
+
+/**
+ * -------------------------------------------------------------
+ * قسم الأرشفة الإلكترونية والإضبارة الذكية (Smart Archive & Dossiers)
+ * -------------------------------------------------------------
+ */
+
+export async function saveArchivedDocument(doc: ArchivedDocument): Promise<string> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_ARCHIVE], 'readwrite');
+    const store = tx.objectStore(STORE_ARCHIVE);
+    const req = store.put(doc);
+    req.onsuccess = () => resolve(doc.id);
+    req.onerror = () => reject(new Error(`فشل حفظ المستند في الأرشيف: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getAllArchivedDocuments(): Promise<ArchivedDocument[]> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_ARCHIVE], 'readonly');
+    const store = tx.objectStore(STORE_ARCHIVE);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      const docs = (req.result as ArchivedDocument[]) || [];
+      docs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      resolve(docs);
+    };
+    req.onerror = () => reject(new Error(`فشل استرجاع مستندات الأرشيف: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getArchivedDocumentsByEmployeeId(empId: string): Promise<ArchivedDocument[]> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_ARCHIVE], 'readonly');
+    const store = tx.objectStore(STORE_ARCHIVE);
+    let req: IDBRequest;
+    try {
+      const index = store.index('employeeId');
+      req = index.getAll(empId);
+    } catch {
+      req = store.getAll();
+    }
+    req.onsuccess = () => {
+      let docs = (req.result as ArchivedDocument[]) || [];
+      if (!store.indexNames.contains('employeeId')) {
+        docs = docs.filter((d) => d.employeeId === empId);
+      }
+      docs.sort((a, b) => new Date(b.documentDate || b.createdAt).getTime() - new Date(a.documentDate || a.createdAt).getTime());
+      resolve(docs);
+    };
+    req.onerror = () => reject(new Error(`فشل استرجاع إضبارة الموظف: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function getArchivedDocumentById(id: string): Promise<ArchivedDocument | null> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_ARCHIVE], 'readonly');
+    const store = tx.objectStore(STORE_ARCHIVE);
+    const req = store.get(id);
+    req.onsuccess = () => resolve((req.result as ArchivedDocument) || null);
+    req.onerror = () => reject(new Error(`فشل جلب المستند: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function deleteArchivedDocument(id: string): Promise<void> {
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_ARCHIVE], 'readwrite');
+    const store = tx.objectStore(STORE_ARCHIVE);
+    const req = store.delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(new Error(`فشل حذف المستند: ${req.error?.message}`));
+    tx.oncomplete = () => db.close();
+  });
+}
+
+export async function saveArchivedDocumentsBatch(docs: ArchivedDocument[]): Promise<void> {
+  if (!docs || docs.length === 0) return;
+  const db = await openGovDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction([STORE_ARCHIVE], 'readwrite');
+    const store = tx.objectStore(STORE_ARCHIVE);
+    docs.forEach((doc) => store.put(doc));
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => {
+      db.close();
+      reject(new Error(`فشل الحفظ المجمع للمستندات: ${tx.error?.message}`));
+    };
   });
 }
 

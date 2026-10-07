@@ -28,6 +28,8 @@ import {
   Activity,
   Network,
   Laptop,
+  FolderOpen,
+  Sparkles,
 } from 'lucide-react';
 import {
   Employee,
@@ -43,6 +45,7 @@ import { getAttendanceLogsByEmployee, getSystemSetting } from '../db/indexedDB';
 import { BarcodeVisual, QrVisual } from './BarcodeVisual';
 import { EmployeeBadgeModal } from './EmployeeBadgeModal';
 import { SalaryAllowancesModal } from './SalaryAllowancesModal';
+import { SmartDossierModal } from './SmartDossierModal';
 import { computeEmployeeSalaryComponents, formatIQD } from '../utils/iraqiSalaryScale';
 import { toast } from './ToastNotification';
 
@@ -62,6 +65,7 @@ interface MasterEmployeeProfileModalProps {
 
 type ProfileTab =
   | 'overview'
+  | 'smart_dossier'
   | 'timeline'
   | 'attendance'
   | 'allowances_promotions'
@@ -90,6 +94,7 @@ export const MasterEmployeeProfileModal: React.FC<MasterEmployeeProfileModalProp
   const [isLoading, setIsLoading] = useState(true);
   const [isBadgeModalOpen, setIsBadgeModalOpen] = useState(false);
   const [isSalaryModalOpen, setIsSalaryModalOpen] = useState(false);
+  const [isDossierModalOpen, setIsDossierModalOpen] = useState(false);
 
   // Load employee data on open
   useEffect(() => {
@@ -236,6 +241,19 @@ export const MasterEmployeeProfileModal: React.FC<MasterEmployeeProfileModalProp
             >
               <User className="w-3.5 h-3.5" />
               <span>البيانات الشخصية والوظيفية</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('smart_dossier')}
+              className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                activeTab === 'smart_dossier'
+                  ? 'bg-amber-500 text-white font-bold shadow-xs'
+                  : 'text-slate-300 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <FolderOpen className="w-3.5 h-3.5" />
+              <span>الإضبارة الذكية والأرشيف 📁</span>
             </button>
 
             <button
@@ -701,6 +719,80 @@ export const MasterEmployeeProfileModal: React.FC<MasterEmployeeProfileModalProp
             </div>
           )}
 
+          {/* TAB 1.5: SMART DOSSIER & ARCHIVE */}
+          {activeTab === 'smart_dossier' && (
+            <div className="space-y-4">
+              <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-amber-500 text-white shadow-sm">
+                    <FolderOpen className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>الإضبارة الإلكترونية والأرشيف الرسمي للموظف</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      مستندات الخدمة المدنية، الأوامر الوزارية، الشهادات، والمستمسكات الثبوتية
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsDossierModalOpen(true)}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-md shadow-amber-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  <span>فتح نافذة الإضبارة الشاملة والمسح الضوئي ⚡</span>
+                </button>
+              </div>
+
+              {/* Quick Dossier Overview Box */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                  <span className="text-[11px] text-slate-400 block font-medium">رمز الإضبارة الموحد:</span>
+                  <span className="font-mono font-bold text-sm text-slate-800 dark:text-slate-100 mt-1 block">
+                    DOS-WR-{employee.employeeNumber}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                  <span className="text-[11px] text-slate-400 block font-medium">موقع الخزانة الورقية:</span>
+                  <span className="font-mono font-bold text-sm text-amber-600 dark:text-amber-400 mt-1 block">
+                    خزانة A-1 / رف 2 / إضبارة #{employee.employeeNumber}
+                  </span>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                  <span className="text-[11px] text-slate-400 block font-medium">التعرف الضوئي (OCR):</span>
+                  <span className="font-bold text-sm text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Tesseract.js مفعل</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* Notice & Direct trigger */}
+              <div className="p-8 text-center rounded-3xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-300 dark:border-slate-700 space-y-3">
+                <FolderOpen className="w-12 h-12 text-amber-500 mx-auto" />
+                <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                  إضبارة الموظف جاهزة للأرشفة الذكية
+                </h4>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  يمكنك رفع ملفات PDF أو صور، واستخدام الماسح الضوئي المكتبي أو الكاميرا الحية لتفريغ التهميشات وقراءة الخط اليدوي وإصدار الهويات الرسمية.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsDossierModalOpen(true)}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-md transition-all cursor-pointer inline-flex items-center gap-2"
+                >
+                  <FolderOpen className="w-4 h-4" />
+                  <span>استعراض وأرشفة ملفات الموظف ({employee.fullName}) 📂</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* TAB 2: TIMELINE */}
           {activeTab === 'timeline' && (
             <div className="space-y-4">
@@ -1150,6 +1242,16 @@ export const MasterEmployeeProfileModal: React.FC<MasterEmployeeProfileModalProp
             const updated = await employeeService.getById(employee.id);
             if (updated) setEmployee(updated);
           }}
+        />
+      )}
+
+      {/* Smart Dossier Modal */}
+      {isDossierModalOpen && employee && (
+        <SmartDossierModal
+          isOpen={isDossierModalOpen}
+          onClose={() => setIsDossierModalOpen(false)}
+          employee={employee}
+          organization={organization}
         />
       )}
     </div>

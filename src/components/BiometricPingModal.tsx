@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { BiometricDevice, BiometricPingResult, BiometricProbePacket } from '../types';
 import { biometricService } from '../services/biometricService';
+import { soundEffects } from '../utils/soundEffects';
 
 interface BiometricPingModalProps {
   isOpen: boolean;
@@ -81,12 +82,14 @@ export const BiometricPingModal: React.FC<BiometricPingModalProps> = ({
       setResult(res);
 
       if (isSuccess) {
+        soundEffects.playDeviceConnectedSound();
         setPingLog((prev) => [
           ...prev,
           `✅ المنفذ [${device.port}] مفتوح ويستجيب بنجاح. تم تأكيد اتصال الجهاز بالمنظومة.`,
           `إحصائيات الفحص: 4 حزم أرسلت، ${packetsReceived} استلمت بنجاح، ${packetLossPercent}% نسبة الفقدان. زمن الاستجابة: ${avgLatency} ملي ثانية.`,
         ]);
       } else {
+        soundEffects.playDeviceDisconnectedSound({ isManualInspection: true });
         setPingLog((prev) => [
           ...prev,
           `❌ تعذر الاتصال: لم يستجب الجهاز على العنوان (${device.ipAddress}:${device.port}).`,

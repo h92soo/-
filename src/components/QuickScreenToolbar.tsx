@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Type,
   Moon,
@@ -15,8 +15,11 @@ import {
   Sliders,
   Calendar,
   Trash2,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { AppearanceSettings, FontFamilyOption } from '../types';
+import { soundEffects } from '../utils/soundEffects';
 
 interface QuickScreenToolbarProps {
   appearance: AppearanceSettings;
@@ -98,6 +101,11 @@ export function QuickScreenToolbar({
   trashedCount = 0,
 }: QuickScreenToolbarProps) {
   const [isExpanded, setIsExpanded] = useState<boolean>(true);
+  const [isSoundOn, setIsSoundOn] = useState<boolean>(() => soundEffects.isEnabled());
+
+  useEffect(() => {
+    return soundEffects.subscribe(setIsSoundOn);
+  }, []);
 
   // Handle font selection
   const handleFontChange = (font: FontFamilyOption) => {
@@ -192,6 +200,23 @@ export function QuickScreenToolbar({
               )}
             </button>
           )}
+
+          {/* System Sound Effects Quick Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = soundEffects.toggle();
+              setIsSoundOn(next);
+            }}
+            className={`p-1.5 rounded-xl border transition-colors flex items-center gap-1 cursor-pointer ${
+              isSoundOn
+                ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300'
+                : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-400'
+            }`}
+            title={isSoundOn ? 'أصوات الأزرار مفعلة (انقر لكتم الأصوات)' : 'أصوات الأزرار مكتومة (انقر للتفعيل)'}
+          >
+            {isSoundOn ? <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+          </button>
 
           {/* Dark/Light Quick Toggle */}
           <button

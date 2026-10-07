@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { ChevronRight, ChevronLeft, ChevronsRight, ChevronsLeft } from 'lucide-react';
+import { soundEffects } from '../utils/soundEffects';
 
 export interface PaginationControlProps {
   currentPage: number;
@@ -7,7 +8,7 @@ export interface PaginationControlProps {
   pageSize: number; // 0 represents "all"
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
-  pageSizeOptions?: number[]; // default [20, 30, 50, 100, 0]
+  pageSizeOptions?: number[]; // default [10, 20, 50, 100, 0]
   itemLabel?: string; // default "موظفاً"
   className?: string;
 }
@@ -18,7 +19,7 @@ export const PaginationControl: React.FC<PaginationControlProps> = React.memo(({
   pageSize,
   onPageChange,
   onPageSizeChange,
-  pageSizeOptions = [20, 30, 50, 100, 0],
+  pageSizeOptions = [10, 20, 50, 100, 0],
   itemLabel = 'موظفاً',
   className = '',
 }) => {
@@ -87,6 +88,7 @@ export const PaginationControl: React.FC<PaginationControlProps> = React.memo(({
               key={size}
               type="button"
               onClick={() => {
+                soundEffects.playButtonClick();
                 onPageSizeChange(size);
                 onPageChange(1);
               }}
@@ -109,7 +111,10 @@ export const PaginationControl: React.FC<PaginationControlProps> = React.memo(({
           {/* First Page */}
           <button
             type="button"
-            onClick={() => onPageChange(1)}
+            onClick={() => {
+              soundEffects.playButtonClick();
+              onPageChange(1);
+            }}
             disabled={safeCurrentPage <= 1}
             className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
             title="الصفحة الأولى"
@@ -120,7 +125,10 @@ export const PaginationControl: React.FC<PaginationControlProps> = React.memo(({
           {/* Previous Page */}
           <button
             type="button"
-            onClick={() => onPageChange(Math.max(1, safeCurrentPage - 1))}
+            onClick={() => {
+              soundEffects.playButtonClick();
+              onPageChange(Math.max(1, safeCurrentPage - 1));
+            }}
             disabled={safeCurrentPage <= 1}
             className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors font-medium flex items-center gap-1 cursor-pointer"
             title="الصفحة السابقة"
@@ -140,7 +148,10 @@ export const PaginationControl: React.FC<PaginationControlProps> = React.memo(({
                 <button
                   key={`page-${p}`}
                   type="button"
-                  onClick={() => onPageChange(p as number)}
+                  onClick={() => {
+                    soundEffects.playButtonClick();
+                    onPageChange(p as number);
+                  }}
                   className={`min-w-7 h-7 px-1.5 rounded-lg font-bold font-mono text-xs transition-colors cursor-pointer ${
                     safeCurrentPage === p
                       ? 'bg-amber-600 text-white shadow-xs'
@@ -156,7 +167,10 @@ export const PaginationControl: React.FC<PaginationControlProps> = React.memo(({
           {/* Next Page */}
           <button
             type="button"
-            onClick={() => onPageChange(Math.min(totalPages, safeCurrentPage + 1))}
+            onClick={() => {
+              soundEffects.playButtonClick();
+              onPageChange(Math.min(totalPages, safeCurrentPage + 1));
+            }}
             disabled={safeCurrentPage >= totalPages}
             className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors font-medium flex items-center gap-1 cursor-pointer"
             title="الصفحة التالية"
@@ -168,7 +182,10 @@ export const PaginationControl: React.FC<PaginationControlProps> = React.memo(({
           {/* Last Page */}
           <button
             type="button"
-            onClick={() => onPageChange(totalPages)}
+            onClick={() => {
+              soundEffects.playButtonClick();
+              onPageChange(totalPages);
+            }}
             disabled={safeCurrentPage >= totalPages}
             className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
             title="الصفحة الأخيرة"

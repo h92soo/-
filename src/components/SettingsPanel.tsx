@@ -38,7 +38,10 @@ import {
   Award,
   QrCode,
   Key,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
+import { soundEffects } from '../utils/soundEffects';
 import { licenseService } from '../services/licenseService';
 import {
   LeaveRulesSettings,
@@ -203,12 +206,17 @@ export function SettingsPanel({
 
   const [panelLicenseStatus, setPanelLicenseStatus] = useState<LicenseStatus | null>(null);
   const [systemFeatures, setSystemFeatures] = useState<SystemFeatureConfig>(DEFAULT_SYSTEM_FEATURE_CONFIG);
+  const [soundFxActive, setSoundFxActive] = useState<boolean>(() => soundEffects.isEnabled());
 
   useEffect(() => {
     licenseService.getStatus().then(setPanelLicenseStatus);
     const unsub = licenseService.subscribe(setPanelLicenseStatus);
+    const unsubSound = soundEffects.subscribe(setSoundFxActive);
     getSystemSetting<SystemFeatureConfig>('system_features_config', DEFAULT_SYSTEM_FEATURE_CONFIG).then(setSystemFeatures);
-    return () => unsub();
+    return () => {
+      unsub();
+      unsubSound();
+    };
   }, []);
 
   // Master password lock for ultra-safe administrative operations (SAsa12589)
@@ -2827,6 +2835,44 @@ export function SettingsPanel({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Global Button Sound Effects Toggle Card */}
+            <div className="p-4 rounded-2xl border border-emerald-300 dark:border-emerald-800 bg-emerald-50/40 dark:bg-emerald-950/20 flex items-center justify-between gap-4 md:col-span-2">
+              <div>
+                <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Volume2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <span>تفعيل أصوات الأزرار والتنبيهات في كامل النظام</span>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  تشغيل مؤثرات صوتية tactile سريعة عند النقر على الأزرار والتبويبات، وتأكيدات عمليات الحضور والباركود (مع حفظ الحالة تلقائياً)
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = soundEffects.toggle();
+                  setSoundFxActive(next);
+                  toast.info(next ? 'تم تفعيل أصوات الأزرار في كامل المنظومة 🔊' : 'تم إطفاء أصوات الأزرار 🔇');
+                }}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border shadow-2xs ${
+                  soundFxActive
+                    ? 'bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600'
+                }`}
+              >
+                {soundFxActive ? (
+                  <>
+                    <Volume2 className="w-4 h-4" />
+                    <span>مفعلة 🔊</span>
+                  </>
+                ) : (
+                  <>
+                    <VolumeX className="w-4 h-4" />
+                    <span>مكتومة 🔇</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             {/* Early Warning Badges */}
             <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/40 flex items-center justify-between gap-4">
               <div>

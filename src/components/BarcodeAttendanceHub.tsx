@@ -44,6 +44,7 @@ import {
   UserAccount,
   LeaveRulesSettings,
   Department,
+  WorkspaceTab,
 } from '../types';
 import { employeeService } from '../services/employeeService';
 import { biometricService } from '../services/biometricService';
@@ -52,6 +53,7 @@ import { BarcodeVisual, QrVisual } from './BarcodeVisual';
 import { EmployeeBadgeModal } from './EmployeeBadgeModal';
 import { BiometricDeviceModal } from './BiometricDeviceModal';
 import { BiometricPingModal } from './BiometricPingModal';
+import { BiometricBackgroundJobBanner } from './BiometricBackgroundJobBanner';
 import { saveAttendanceLogsBatch } from '../db/indexedDB';
 import { toast } from './ToastNotification';
 import { PaginationControl } from './PaginationControl';
@@ -63,6 +65,7 @@ interface BarcodeAttendanceHubProps {
   employees?: Employee[];
   currentUser?: UserAccount;
   leaveRules?: LeaveRulesSettings;
+  onNavigate?: (tab: WorkspaceTab) => void;
 }
 
 type ActiveHubTab = 'devices' | 'biometric_logs' | 'biometric_stats' | 'barcode_scanner';
@@ -74,6 +77,7 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
   employees: propEmployees,
   currentUser,
   leaveRules,
+  onNavigate,
 }) => {
   const [activeTab, setActiveTab] = useState<ActiveHubTab>('devices');
 
@@ -273,6 +277,7 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
   // Connect to PC & Fetch Logs from a Device
   const handleConnectAndSyncDevice = async (device: BiometricDevice) => {
     setSyncingDeviceId(device.id);
+    soundEffects.playButtonClick();
     try {
       const result = await biometricService.connectAndSyncDevice(device, employees);
       const freshLogs = await biometricService.getBiometricLogs();
@@ -287,11 +292,17 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
       });
       setShowSyncReportModal(true);
 
+      soundEffects.playDeviceConnectedSound();
       toast.success(
-        `تم ربط الجهاز (${device.name}) بالحاسبة بنجاح! تم سحب وتحديث (${result.importedCount}) بصمة حضور ومطابقتها مع شؤون الموظفين.`
+        `✅ تم ربط الجهاز (${device.name}) بنجاح! تم سحب وتحديث (${result.importedCount}) حركة بصمة ومطابقتها مع شؤون الموظفين.`
       );
-    } catch {
-      toast.error(`تعذر الاتصال بالجهاز (${device.name})`);
+    } catch (err: any) {
+      soundEffects.playDeviceDisconnectedSound();
+      toast.error(
+        `⚠️ تنبيه: عدم ربط الجهاز (${device.name})! ${
+          err?.message || 'الجهاز غير متصل بالشبكة أو كابل التوصيل غير موصول.'
+        }`
+      );
     } finally {
       setSyncingDeviceId(null);
     }
@@ -300,38 +311,56 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
   // Sync All Devices
   const handleSyncAllDevices = async () => {
     setIsSyncingAll(true);
+    soundEffects.playButtonClick();
     let totalImported = 0;
     try {
-      for (const dev of devices) {
-        if (dev.status === 'online') {
-          const res = await biometricService.connectAndSyncDevice(dev, employees);
-          totalImported += res.importedCount;
-        }
+      const onlineDevs = devices.filter((d) => d.status === 'online');
+      if (onlineDevs.length === 0) {
+        soundEffects.playDeviceDisconnectedSound();
+        toast.error('⚠️ تنبيه: عدم ربط أي جهاز بصمة! لم يتم العثور على أجهزة متصلة بالشبكة حالياً.');
+        setIsSyncingAll(false);
+        return;
+      }
+      for (const dev of onlineDevs) {
+        const res = await biometricService.connectAndSyncDevice(dev, employees);
+        totalImported += res.importedCount;
       }
       const freshLogs = await biometricService.getBiometricLogs();
       setBiometricLogs(freshLogs);
-      toast.success(`تم سحب وتحديث (${totalImported}) حركة حضور من كافة أجهزة البصمة المربوطة بنجاح!`);
-    } catch {
-      toast.error('حدث خطأ أثناء المزامنة الشاملة');
+      soundEffects.playDeviceConnectedSound();
+      toast.success(`✅ تم ربط وسحب (${totalImported}) حركة حضور من أجهزة البصمة المتصلة بنجاح!`);
+    } catch (err: any) {
+      soundEffects.playDeviceDisconnectedSound();
+      toast.error(`⚠️ تنبيه: تعذر إتمام المزامنة: ${err?.message || 'أجهزة البصمة غير مربوطة'}`);
     } finally {
       setIsSyncingAll(false);
     }
   };
 
-  // Detect USB Plug & Play Devices and immediately fetch comprehensive reports
+  // Real Detection of All Biometric Devices (USB & Network)
   const handleDetectUsbDevices = async () => {
     setIsDetectingUsb(true);
+    soundEffects.playButtonClick();
+    toast.info('جارٍ الكشف الحقيقي عن أجهزة البصمة (TCP/IP & USB)...');
     try {
       const res = await biometricService.autoDetectDevices(devices);
-      toast.success(res.message);
       const reloaded = await biometricService.getDevices();
       setDevices(reloaded);
-      const usbOrFirst = reloaded.find((d) => d.connectionType === 'usb_direct') || reloaded[0];
-      if (usbOrFirst) {
-        await handleConnectAndSyncDevice(usbOrFirst);
+
+      if (res.hasConnected) {
+        soundEffects.playDeviceConnectedSound();
+        toast.success(res.message);
+        const firstConnected = reloaded.find((d) => d.status === 'online');
+        if (firstConnected) {
+          await handleConnectAndSyncDevice(firstConnected);
+        }
+      } else {
+        soundEffects.playDeviceDisconnectedSound();
+        toast.error(`⚠️ تنبيه: عدم ربط أجهزة البصمة! ${res.message}`);
       }
-    } catch {
-      toast.error('لم يتم العثور على أجهزة بصمة متصلة عبر USB');
+    } catch (err: any) {
+      soundEffects.playDeviceDisconnectedSound();
+      toast.error(`⚠️ تنبيه: فشل الكشف عن الأجهزة: ${err?.message || 'أجهزة البصمة غير مربوطة'}`);
     } finally {
       setIsDetectingUsb(false);
     }
@@ -339,13 +368,22 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
 
   // Ping All Devices
   const handlePingAll = async () => {
+    soundEffects.playButtonClick();
     toast.info('جارٍ فحص البينغ واستجابة كافة أجهزة البصمة المسجلة...');
+    let connected = 0;
     for (const dev of devices) {
-      await biometricService.pingDevice(dev);
+      const res = await biometricService.pingDevice(dev);
+      if (res.success) connected++;
     }
     const fresh = await biometricService.getDevices();
     setDevices(fresh);
-    toast.success('اكتمل فحص البينغ لجميع الأجهزة وتحديث زمن الاستجابة.');
+    if (connected > 0) {
+      soundEffects.playDeviceConnectedSound();
+      toast.success(`✅ تم فحص البينغ: (${connected}/${devices.length}) أجهزة متصلة وتستجيب بنجاح.`);
+    } else {
+      soundEffects.playDeviceDisconnectedSound();
+      toast.error(`⚠️ تنبيه: عدم ربط أي جهاز! لم يستجب أي جهاز من أصل (${devices.length}) على الشبكة.`);
+    }
   };
 
   // Delete Device
@@ -544,6 +582,18 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
 
         {/* Global Controls & Dashboard Link */}
         <div className="flex flex-wrap items-center gap-2">
+          {onNavigate && (
+            <button
+              type="button"
+              onClick={() => onNavigate('biometric_audit')}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md shadow-indigo-600/20 transition-all flex items-center gap-1.5 cursor-pointer ring-1 ring-white/20"
+              title="فتح كشف البصمة الذكي الشامل (يومي، أسبوعي، شهري وسجل البصمة)"
+            >
+              <Fingerprint className="w-4 h-4 text-cyan-300 animate-pulse" />
+              <span>كشف البصمة الشامل (يومي/أسبوعي/شهري) ⚡</span>
+            </button>
+          )}
+
           {onBackToDashboard && (
             <button
               type="button"
@@ -569,6 +619,18 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
 
       {/* 2. PRIMARY TAB SELECTOR */}
       <div className="flex flex-wrap items-center gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl no-print text-xs font-bold">
+        {onNavigate && (
+          <button
+            type="button"
+            onClick={() => onNavigate('biometric_audit')}
+            className="flex-1 min-w-[200px] py-2.5 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm hover:shadow-md hover:from-blue-700 hover:to-indigo-700 font-bold"
+          >
+            <Fingerprint className="w-4 h-4 text-cyan-200 animate-pulse" />
+            <span>كشف البصمة الذكي (يومي / أسبوعي / شهري)</span>
+            <span className="text-[10px] px-1.5 py-0.2 bg-white/20 rounded-full font-mono">شامل ⚡</span>
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => setActiveTab('devices')}
@@ -647,10 +709,10 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
                 onClick={handleDetectUsbDevices}
                 disabled={isDetectingUsb}
                 className="px-3.5 py-2 rounded-xl font-bold bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                title="كشف أجهزة البصمة المربوطة بالحاسبة عبر كابل USB مباشرة (Plug & Play)"
+                title="كشف أجهزة البصمة الحقيقي وفحص الاتصال الشبكي TCP/IP ومنافذ USB مباشرة"
               >
                 <Laptop className={`w-4 h-4 ${isDetectingUsb ? 'animate-bounce' : ''}`} />
-                <span>{isDetectingUsb ? 'جارٍ فحص منافذ USB...' : 'كشف أجهزة USB المربوطة بالحاسبة'}</span>
+                <span>{isDetectingUsb ? 'جارٍ الكشف الحقيقي عن الأجهزة...' : 'كشف أجهزة البصمة (كشف حقيقي)'}</span>
               </button>
 
               <button
@@ -671,19 +733,33 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
             </div>
           </div>
 
+          {/* BACKGROUND JOB MONITORING PANEL (وظيفة الفحص الدوري التلقائي بالخلفية) */}
+          <BiometricBackgroundJobBanner />
+
           {/* DEVICE CARDS GRID */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {devices.map((device) => {
               const isSyncingThis = syncingDeviceId === device.id;
+              const isOnline = device.status === 'online';
               return (
                 <div
                   key={device.id}
-                  className="p-5 rounded-3xl bg-white dark:bg-slate-800 border border-slate-200/90 dark:border-slate-700/80 shadow-2xs hover:shadow-xs transition-shadow space-y-3.5"
+                  className={`p-5 rounded-3xl border transition-all space-y-3.5 shadow-2xs hover:shadow-xs ${
+                    isOnline
+                      ? 'bg-white dark:bg-slate-800/90 border-emerald-300/60 dark:border-emerald-800/60 hover:border-emerald-400'
+                      : 'bg-white dark:bg-slate-800/90 border-rose-300/60 dark:border-rose-900/60 hover:border-rose-400'
+                  }`}
                 >
                   {/* Card Header: Device Name, Brand, Status Badge */}
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-11 h-11 rounded-2xl bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200/60 dark:border-indigo-800/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                      <div
+                        className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 border ${
+                          isOnline
+                            ? 'bg-emerald-50 dark:bg-emerald-950/70 border-emerald-200/60 dark:border-emerald-800/60 text-emerald-600 dark:text-emerald-400'
+                            : 'bg-rose-50 dark:bg-rose-950/70 border-rose-200/60 dark:border-rose-800/60 text-rose-600 dark:text-rose-400'
+                        }`}
+                      >
                         {device.deviceType === 'face' ? (
                           <ScanFace className="w-6 h-6" />
                         ) : device.deviceType === 'fingerprint' ? (
@@ -707,16 +783,20 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
                       </div>
                     </div>
 
-                    {/* Online Status Pill */}
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-mono font-bold">
+                    {/* Online Status Pill with Live Pulse */}
+                    <div
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-mono font-bold border ${
+                        isOnline
+                          ? 'bg-emerald-50 dark:bg-emerald-950/80 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-rose-50 dark:bg-rose-950/80 border-rose-300 dark:border-rose-800 text-rose-600 dark:text-rose-400'
+                      }`}
+                    >
                       <span
                         className={`w-2 h-2 rounded-full ${
-                          device.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
+                          isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'
                         }`}
                       />
-                      <span className={device.status === 'online' ? 'text-emerald-700 dark:text-emerald-300' : 'text-rose-600'}>
-                        {device.status === 'online' ? 'متصل Online' : 'غير متصل'}
-                      </span>
+                      <span>{isOnline ? 'متصل Online' : 'غير متصل Offline'}</span>
                     </div>
                   </div>
 
@@ -1130,7 +1210,7 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
                   pageSize={logPageSize}
                   onPageChange={setLogPage}
                   onPageSizeChange={setLogPageSize}
-                  pageSizeOptions={[15, 30, 50, 100, 0]}
+                  pageSizeOptions={[10, 20, 50, 100, 0]}
                   itemLabel="حركة بصمة"
                 />
               </div>
@@ -1462,7 +1542,7 @@ export const BarcodeAttendanceHub: React.FC<BarcodeAttendanceHubProps> = ({
                     pageSize={badgesPageSize}
                     onPageChange={setBadgesPage}
                     onPageSizeChange={setBadgesPageSize}
-                    pageSizeOptions={[20, 30, 50, 0]}
+                    pageSizeOptions={[10, 20, 50, 100, 0]}
                     itemLabel="موظفاً"
                   />
                 </div>

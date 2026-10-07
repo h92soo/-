@@ -29,6 +29,8 @@ import {
   TrendingUp,
   PieChart,
   Bell,
+  Fingerprint,
+  FolderOpen,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { toast } from './ToastNotification';
@@ -152,6 +154,18 @@ export function ExecutiveDashboardHub({
       badgeBg: 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border-amber-300/60',
     },
     {
+      id: 'smart_archive' as WorkspaceTab,
+      title: 'مركز الأرشفة الرقمي والإضبارة الذكية',
+      subtitle: 'أرشيف الموظفين، السكنر، والتعرف الضوئي (OCR)',
+      description: 'أرشفة الوثائق والكتب الرسمية، قراءة وتفريغ الخط اليدوي، السكنر المكتبي والتصوير الحي، وطباعة التعاريف والبطاقات الوظيفية.',
+      icon: FolderOpen,
+      badge: 'Tesseract.js OCR ⚡',
+      colorGradient: 'from-amber-500 via-orange-500 to-amber-600',
+      bgHover: 'hover:border-amber-500/60 dark:hover:border-amber-500/60',
+      shadowColor: 'shadow-amber-500/15',
+      badgeBg: 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border-amber-300/60',
+    },
+    {
       id: 'daily_movements' as WorkspaceTab,
       title: 'مركز تسجيل الحركات والتقارير الفورية',
       subtitle: 'تسجيل يومي فوري بنقرة واحدة',
@@ -210,6 +224,18 @@ export function ExecutiveDashboardHub({
       bgHover: 'hover:border-amber-600/60 dark:hover:border-amber-600/60',
       shadowColor: 'shadow-amber-600/10',
       badgeBg: 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border-amber-300/60',
+    },
+    {
+      id: 'biometric_audit' as WorkspaceTab,
+      title: 'كشف البصمة الذكي الشامل (يومي / أسبوعي / شهري)',
+      subtitle: 'فلترة ذكية، ربط الأقسام، وسجل حركات أجهزة البصمة',
+      description: 'كشف حضور وانصراف تفصيلي للموظفين، فلترة حسب القسم والأجهزة والنوع، كشف يومي وأسبوعي وشيت شهري وسجل البصمة اللحظي مع إمكانية التصدير والطباعة الرسمية.',
+      icon: Fingerprint,
+      badge: 'كشف البصمة المتقدم ⚡',
+      colorGradient: 'from-blue-600 via-indigo-600 to-indigo-800',
+      bgHover: 'hover:border-indigo-500/60 dark:hover:border-indigo-500/60',
+      shadowColor: 'shadow-indigo-500/15',
+      badgeBg: 'bg-indigo-100 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border-indigo-300/60',
     },
     {
       id: 'barcode_hub' as WorkspaceTab,

@@ -1307,7 +1307,7 @@ export function AttendanceReports({
                 pageSize={dailyReportPageSize}
                 onPageChange={setDailyReportPage}
                 onPageSizeChange={setDailyReportPageSize}
-                pageSizeOptions={[20, 30, 50, 100, 0]}
+                pageSizeOptions={[10, 20, 50, 100, 0]}
                 itemLabel="موظفاً"
               />
             )}
@@ -1515,7 +1515,7 @@ export function AttendanceReports({
                 pageSize={monthlyReportPageSize}
                 onPageChange={setMonthlyReportPage}
                 onPageSizeChange={setMonthlyReportPageSize}
-                pageSizeOptions={[20, 30, 50, 100, 0]}
+                pageSizeOptions={[10, 20, 50, 100, 0]}
                 itemLabel="موظفاً بالشيت"
               />
             )}
@@ -1810,7 +1810,7 @@ export function AttendanceReports({
                 pageSize={archiveReportPageSize}
                 onPageChange={setArchiveReportPage}
                 onPageSizeChange={setArchiveReportPageSize}
-                pageSizeOptions={[20, 30, 50, 100, 0]}
+                pageSizeOptions={[10, 20, 50, 100, 0]}
                 itemLabel="سجلاً بالأرشيف"
                 className="no-print"
               />

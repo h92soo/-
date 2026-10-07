@@ -688,6 +688,7 @@ export interface AutoBackupSettings {
 export type WorkspaceTab =
   | 'dashboard'
   | 'employees'
+  | 'smart_archive' // قسم الأرشفة الإلكترونية والإضبارة الذكية الشاملة
   | 'daily_movements'
   | 'reports'
   | 'calendar'
@@ -699,6 +700,7 @@ export type WorkspaceTab =
   | 'allow_promotions' // العلاوات والترفيعات
   | 'retirement' // هيئة وإجراءات التقاعد
   | 'barcode_hub' // مركز الباركود والبطاقات الذكية الحضور
+  | 'biometric_audit' // كشف البصمة الذكي الشامل (يومي / أسبوعي / شهري)
   | 'analytics'; // رسوم بيانية تفاعلية للموظفين (Recharts)
 
 // Commercial Licensing & Trial Management
@@ -870,6 +872,45 @@ export interface BiometricPingResult {
   packets?: BiometricProbePacket[];
 }
 
+export interface BiometricDetectionItem {
+  device: BiometricDevice;
+  success: boolean;
+  latencyMs: number;
+  message: string;
+  error?: string;
+}
+
+export interface BiometricDetectionResult {
+  hasConnected: boolean;
+  connectedCount: number;
+  disconnectedCount: number;
+  totalScanned: number;
+  detectedDevices: BiometricDevice[];
+  disconnectedDevices: BiometricDevice[];
+  results: BiometricDetectionItem[];
+  message: string;
+}
+
+export interface BiometricBackgroundJobSettings {
+  enabled: boolean;
+  intervalMinutes: number; // default 5 minutes
+  notifyOnStatusChange: boolean;
+  silentAudio: boolean;
+}
+
+export interface BiometricBackgroundJobState {
+  enabled: boolean;
+  intervalMinutes: number;
+  isRunning: boolean;
+  lastRunTimestamp: number | null;
+  nextRunTimestamp: number | null;
+  secondsRemaining: number;
+  lastResult: BiometricDetectionResult | null;
+  onlineCount: number;
+  offlineCount: number;
+  totalDevices: number;
+}
+
 export const DEFAULT_BIOMETRIC_DEVICES: BiometricDevice[] = [
   {
     id: 'DEV-ZK-01',
@@ -957,6 +998,220 @@ export const DEFAULT_BIOMETRIC_DEVICES: BiometricDevice[] = [
   },
 ];
 
+// ==========================================
+// قسم الأرشفة الإلكترونية والإضبارة الذكية
+// Electronic Archiving & Smart Dossier Hub
+// ==========================================
 
+export type ArchivedDocumentCategory =
+  | 'administrative_order' // أمر إداري (تعيين / تثبيت / نقل / تنسيب)
+  | 'appreciation_letter' // كتاب شكر وتقدير / مكافأة تشجيعية
+  | 'promotion_decree' // قرار ترفيع / علاوة سنوية
+  | 'academic_credential' // وثيقة تخرج / شهادة دراسية / معادلة
+  | 'national_identity' // بطاقة وطنية / هوية أحوال / شهادة جنسية
+  | 'employee_badge' // تعريف وظيفي / باج رسمي / هوية الدائرة
+  | 'medical_report' // تقرير لجان طبية / إجازة مرضية
+  | 'leave_request' // طلب إجازة رسمية / إجازة 5 سنوات / أمومة
+  | 'guarantee_contract' // عقد توظيف (قرار 315) / كفالة ضامنة
+  | 'service_certificate' // خلاصة خدمة وتأييد استمرار بالخدمة
+  | 'handwritten_note' // مذكرة خطية / هامش يدوي رسمي
+  | 'other'; // وثائق أخرى
 
+export interface DocumentCategoryMeta {
+  id: ArchivedDocumentCategory;
+  nameAr: string;
+  badgeColor: string;
+  iconName: string;
+  isRequiredForDossier: boolean; // هل يعتبر مستنداً أساسياً لاكتمال إضبارة الموظف
+  description: string;
+}
 
+export const ARCHIVE_DOCUMENT_CATEGORIES: DocumentCategoryMeta[] = [
+  {
+    id: 'administrative_order',
+    nameAr: 'أمر إداري / تعيين وتثبيت',
+    badgeColor: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
+    iconName: 'FileText',
+    isRequiredForDossier: true,
+    description: 'الأوامر الوزارية والإدارية، المباشرة، التعيين، التثبيت والتنسيب',
+  },
+  {
+    id: 'national_identity',
+    nameAr: 'مستمسكات ثبوتية وهوية وطنية',
+    badgeColor: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+    iconName: 'ShieldCheck',
+    isRequiredForDossier: true,
+    description: 'البطاقة الوطنية الموحدة، هوية الأحوال، شهادة الجنسية وبطاقة السكن',
+  },
+  {
+    id: 'academic_credential',
+    nameAr: 'شهادة ومؤهل دراسي',
+    badgeColor: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+    iconName: 'GraduationCap',
+    isRequiredForDossier: true,
+    description: 'وثيقة التخرج، الجدارية، صحة الصدور، وقرارات معادلة الشهادات',
+  },
+  {
+    id: 'employee_badge',
+    nameAr: 'تعريف وهوية وظيفية (باج)',
+    badgeColor: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+    iconName: 'CreditCard',
+    isRequiredForDossier: true,
+    description: 'هوية الدائرة الرسمية، باج الدوام الذكي، والتعاريف الوظيفية',
+  },
+  {
+    id: 'appreciation_letter',
+    nameAr: 'كتب شكر وتقدير ومكافآت',
+    badgeColor: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+    iconName: 'Award',
+    isRequiredForDossier: false,
+    description: 'كتب الشكر والتقدير الوزارية التي تمنح قدماً ممتازاً',
+  },
+  {
+    id: 'promotion_decree',
+    nameAr: 'قرارات الترفيع والعلاوة',
+    badgeColor: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300 border-purple-200 dark:border-purple-800',
+    iconName: 'TrendingUp',
+    isRequiredForDossier: false,
+    description: 'أوامر استحقاق العلاوات السنوية والترفيعات إلى الدرجات الأعلى',
+  },
+  {
+    id: 'service_certificate',
+    nameAr: 'خلاصة خدمة وتأييدات',
+    badgeColor: 'bg-teal-100 text-teal-800 dark:bg-teal-900/40 dark:text-teal-300 border-teal-200 dark:border-teal-800',
+    iconName: 'Briefcase',
+    isRequiredForDossier: false,
+    description: 'تأييدات الاستمرار بالخدمة، حساب الخدمة العسكرية السابقة والتقاعد',
+  },
+  {
+    id: 'medical_report',
+    nameAr: 'تقارير لجان طبية وإجازات',
+    badgeColor: 'bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+    iconName: 'HeartPulse',
+    isRequiredForDossier: false,
+    description: 'قرارات اللجان الطبية الرسمية، التقارير الصحية، الإجازات المرضية',
+  },
+  {
+    id: 'leave_request',
+    nameAr: 'أوامر الإجازات الطويلة والـ 5 سنوات',
+    badgeColor: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300 border-orange-200 dark:border-orange-800',
+    iconName: 'Calendar',
+    isRequiredForDossier: false,
+    description: 'إجازة الـ 5 سنوات، إجازات الأمومة، والدراسة والمصاحبة',
+  },
+  {
+    id: 'guarantee_contract',
+    nameAr: 'عقود وكفالات وتعهدات',
+    badgeColor: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800',
+    iconName: 'FileCheck',
+    isRequiredForDossier: false,
+    description: 'عقود التعيين المؤقت (قرار 315)، الكفالات المالية والتعهدات القانونية',
+  },
+  {
+    id: 'handwritten_note',
+    nameAr: 'مذكرات وهوامش خط يد',
+    badgeColor: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800',
+    iconName: 'PenTool',
+    isRequiredForDossier: false,
+    description: 'المطالعات المكتوبة بخط اليد وتواقيع وتهميشات السادة المسؤولين',
+  },
+  {
+    id: 'other',
+    nameAr: 'مستندات ووثائق عامة',
+    badgeColor: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700',
+    iconName: 'Paperclip',
+    isRequiredForDossier: false,
+    description: 'أي ملاحق أو وثائق رسمية إضافية غير مصنفة أعلاه',
+  },
+];
+
+export type DocumentClassificationLevel = 'normal' | 'confidential' | 'top_secret' | 'urgent';
+
+export interface ArchivedDocument {
+  id: string; // المعرف الفريد للوثيقة (DOC-YYYY-XXXX)
+  employeeId: string; // معرف الموظف المرتبط به المستند
+  employeeName: string; // اسم الموظف
+  employeeNumber: string; // الرقم الوظيفي
+  department: string; // القسم
+  documentTitle: string; // عنوان الوثيقة أو موضوع الكتاب الرسمي
+  category: ArchivedDocumentCategory; // تصنيف الوثيقة
+  referenceNumber: string; // العدد / رقم الصادر أو الوارد (مثال: 1245 / إ)
+  documentDate: string; // تاريخ الوثيقة (YYYY-MM-DD)
+  hijriDate?: string; // التاريخ الهجري إن وجد
+  issuingAuthority: string; // الجهة المصدرة (مثال: وزارة الموارد المائية - مقر الوزارة)
+  recipientParty?: string; // الجهة الموجه إليها الكتاب
+  
+  // الملف والبيانات البصرية
+  fileUrl: string; // رابط الصورة الممسوحة أو Base64 Data URL
+  thumbnailUrl?: string; // معاينة مصغرة محسنة للتحميل فائق السرعة
+  fileName: string; // اسم الملف الأصلي
+  fileType: string; // نوع الملف (image/jpeg, image/png, application/pdf)
+  fileSizeBytes?: number; // الحجم بالبايت
+  source: 'scanner' | 'camera' | 'file_upload' | 'generated_id' | 'system'; // مصدر المستند
+  
+  // ميزات قراءة الخط اليدوي والذكاء الاصطناعي (Handwriting & OCR)
+  isHandwritten: boolean; // هل المستند يحتوي على كتابة يدوية أو تهميشات باليد
+  ocrExtractedText: string; // النص المفرغ المقروء من الخط اليدوي أو الطباعة
+  ocrConfidence: number; // نسبة الدقة للتعرف (0-100%)
+  handwrittenNotes?: string; // التهميشات والملاحظات اليدوية المفروزة بالتحديد
+  detectedKeywords: string[]; // الكلمات المفتاحية المفهرسة آلياً للبحث اللحظي
+  ocrStatus: 'pending' | 'completed' | 'manual_verified' | 'failed'; // حالة القراءة والتدقيق
+  ocrProcessedAt?: string;
+
+  // الأرشفة المادية (الربط بين الأرشيف الرقمي والدولاب الورقي)
+  archiveCabinet: string; // موقع الإضبارة الورقية (خزانة أ / رف 3 / إضبارة 14)
+  archiveFolderCode: string; // الرمز المكتوب على البوكس فايل الورقي
+  confidentiality: DocumentClassificationLevel; // التصنيف الأمني: عادي، سري، سري للغاية، عاجل
+  
+  // هوامش وتدقيق وتصنيف ديناميكي متقدم
+  notes?: string;
+  tags?: string[];
+  customAttributes?: Array<{ key: string; label: string; value: string }>; // ملفات تعريفية ديناميكية مخصصة
+  archivedBy: string; // اسم الموظف المؤرشف
+  createdAt: string; // تاريخ الأرشفة
+  updatedAt: string;
+}
+
+export interface SmartDossierSummary {
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  department: string;
+  totalDocuments: number;
+  handwrittenCount: number;
+  completenessScore: number; // نسبة اكتمال الإضبارة (0 - 100%)
+  missingRequiredDocs: string[]; // الوثائق الإلزامية الناقصة
+  documentsByCategory: Record<ArchivedDocumentCategory, number>;
+  latestDocumentDate?: string;
+  physicalCabinetLocation: string;
+  dossierCode: string;
+  hasCertifiedIdBadge: boolean;
+  hasNationalId: boolean;
+  hasAdminHireOrder: boolean;
+  hasAcademicCertificate: boolean;
+}
+
+// تعريف وهوية الموظف الرسمية (Employee Official Identity / Definition Badge)
+export interface EmployeeDefinitionBadge {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber: string;
+  civilGrade: number;
+  civilStage: number;
+  jobTitle: string;
+  department: string;
+  division?: string;
+  nationalId?: string;
+  bloodType?: string;
+  barcodeValue: string;
+  qrPayload: string;
+  issueDate: string;
+  expiryDate: string;
+  badgeSerialNumber: string;
+  photoUrl?: string;
+  directorSignatureTitle: string;
+  isVerified: boolean;
+  printedCount: number;
+  lastPrintedAt?: string;
+}

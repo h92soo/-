@@ -93,12 +93,14 @@ import { showToast, toast } from './ToastNotification';
 import { TrashModal } from './TrashModal';
 import { MasterEmployeeProfileModal } from './MasterEmployeeProfileModal';
 import { EmployeeBadgeModal } from './EmployeeBadgeModal';
+import { SmartDossierModal } from './SmartDossierModal';
 import { DepartmentManagerModal, getColorClasses } from './DepartmentManagerModal';
 import { EmployeeAuditLogModal } from './EmployeeAuditLogModal';
 import { BiometricDeviceModal } from './BiometricDeviceModal';
 import { employeeService } from '../services/employeeService';
 import { biometricService } from '../services/biometricService';
-import { QrCode, UserCheck2 } from 'lucide-react';
+import { soundEffects } from '../utils/soundEffects';
+import { QrCode, UserCheck2, FolderOpen } from 'lucide-react';
 import {
   moveToTrash,
   canUndo,
@@ -389,6 +391,7 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
   const [isExportingBackup, setIsExportingBackup] = useState(false);
   const [profileModalEmployeeId, setProfileModalEmployeeId] = useState<string | null>(null);
   const [badgeModalEmployee, setBadgeModalEmployee] = useState<Employee | null>(null);
+  const [smartDossierEmployee, setSmartDossierEmployee] = useState<Employee | null>(null);
   const [showSyncBackupModal, setShowSyncBackupModal] = useState(false);
 
   // Trash Bin & Undo/Redo State
@@ -2807,6 +2810,17 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
                             <span>الهوية</span>
                           </button>
 
+                          {/* Smart Dossier & Archive button */}
+                          <button
+                            type="button"
+                            onClick={() => setSmartDossierEmployee(emp)}
+                            className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[11px] font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                            title={`فتح الإضبارة الذكية الشاملة والأرشيف للموظف ${emp.fullName}`}
+                          >
+                            <FolderOpen className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                            <span>الإضبارة 📁</span>
+                          </button>
+
                           {/* Quick Monthly Attendance Sheet (1-31) for this employee */}
                           <button
                             type="button"
@@ -2925,15 +2939,18 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
               <span>موظفاً</span>
             </div>
 
-            {/* Page Size Switcher (20 / 30 / 50 / 100 / الكل) */}
+            {/* Page Size Switcher (10 / 20 / 50 / 100 / الكل) */}
             <div className="flex items-center gap-2">
-              <span className="text-slate-500 dark:text-slate-400 hidden md:inline">عدد الموظفين بالصفحة:</span>
+              <span className="text-slate-500 dark:text-slate-400 hidden md:inline text-[11px]">
+                عدد السجلات بالصفحة:
+              </span>
               <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/80 p-1 rounded-xl border border-slate-200 dark:border-slate-700/80">
-                {[20, 30, 50, 100, 0].map((size) => (
+                {[10, 20, 50, 100, 0].map((size) => (
                   <button
                     key={size}
                     type="button"
                     onClick={() => {
+                      soundEffects.playButtonClick();
                       setPageSize(size);
                       setCurrentPage(1);
                     }}
@@ -4264,6 +4281,23 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
             setProfileModalEmployeeId(null);
             handleOpenAuditLog(empId);
           }}
+        />
+      )}
+
+      {/* 13.5. Smart Dossier Modal */}
+      {smartDossierEmployee && (
+        <SmartDossierModal
+          isOpen={Boolean(smartDossierEmployee)}
+          onClose={() => setSmartDossierEmployee(null)}
+          employee={smartDossierEmployee}
+          organization={{
+            ministryName: 'وزارة الموارد المائية',
+            directorateName: 'دائرة الموارد المائية',
+            departmentName: 'قسم إدارة الموارد البشرية والخدمة المدنية',
+            officialEmblem: 'gold',
+            operatingYear: 2026,
+          }}
+          onDossierUpdated={loadEmployees}
         />
       )}
 

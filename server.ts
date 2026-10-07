@@ -215,6 +215,122 @@ async function startServer() {
     });
   });
 
+  /**
+   * Real multi-device scan: Probes multiple biometric terminals simultaneously
+   * Uses real TCP socket connection per device.
+   */
+  app.post('/api/biometric/scan-all', async (req, res) => {
+    const { devices = [], timeoutMs = 1200 } = req.body;
+    if (!Array.isArray(devices) || devices.length === 0) {
+      return res.status(400).json({ success: false, message: 'قائمة الأجهزة فارغة' });
+    }
+
+    const cleanTimeout = Math.min(Math.max(Number(timeoutMs) || 1200, 300), 3000);
+
+    const probeDevice = (dev: { id: string; name: string; ip: string; port?: number }) => {
+      return new Promise<{
+        id: string;
+        name: string;
+        ip: string;
+        port: number;
+        success: boolean;
+        latencyMs: number;
+        message: string;
+        error?: string;
+      }>((resolve) => {
+        const cleanIp = String(dev.ip || '').trim();
+        const cleanPort = Number(dev.port) || 4370;
+
+        if (!cleanIp) {
+          return resolve({
+            id: dev.id,
+            name: dev.name || 'جهاز غير معروف',
+            ip: '',
+            port: cleanPort,
+            success: false,
+            latencyMs: 0,
+            message: 'عنوان الآي بي فارغ أو غير صالح',
+            error: 'INVALID_IP',
+          });
+        }
+
+        const start = performance.now();
+        const socket = new net.Socket();
+        let isDone = false;
+
+        socket.setTimeout(cleanTimeout);
+
+        socket.connect(cleanPort, cleanIp, () => {
+          if (!isDone) {
+            isDone = true;
+            const latency = Math.max(1, Math.round(performance.now() - start));
+            socket.destroy();
+            resolve({
+              id: dev.id,
+              name: dev.name,
+              ip: cleanIp,
+              port: cleanPort,
+              success: true,
+              latencyMs: latency,
+              message: `✅ تم الربط بنجاح مع جهاز البصمة (${dev.name}) - استجابة حقيقية: ${latency}ms`,
+            });
+          }
+        });
+
+        socket.on('timeout', () => {
+          if (!isDone) {
+            isDone = true;
+            socket.destroy();
+            resolve({
+              id: dev.id,
+              name: dev.name,
+              ip: cleanIp,
+              port: cleanPort,
+              success: false,
+              latencyMs: 0,
+              error: 'ETIMEDOUT',
+              message: `⚠️ تنبيه: عدم ربط الجهاز! مهلة الاتصال انتهت مع (${dev.name} - ${cleanIp}:${cleanPort}). الجهاز غير موصول بالشبكة أو كابل الشبكة مفصول.`,
+            });
+          }
+        });
+
+        socket.on('error', (err: any) => {
+          if (!isDone) {
+            isDone = true;
+            socket.destroy();
+            const code = err.code || 'ECONNREFUSED';
+            resolve({
+              id: dev.id,
+              name: dev.name,
+              ip: cleanIp,
+              port: cleanPort,
+              success: false,
+              latencyMs: 0,
+              error: code,
+              message: `⚠️ تنبيه: عدم ربط الجهاز! تعذر الوصول إلى (${dev.name} - ${cleanIp}:${cleanPort}) - [${code}]. الجهاز مغلق أو كابل الشبكة غير متصل.`,
+            });
+          }
+        });
+      });
+    };
+
+    const results = await Promise.all(devices.map(probeDevice));
+    const connectedCount = results.filter((r) => r.success).length;
+    const disconnectedCount = results.length - connectedCount;
+
+    return res.json({
+      success: connectedCount > 0,
+      totalScanned: results.length,
+      connectedCount,
+      disconnectedCount,
+      results,
+      summary:
+        connectedCount > 0
+          ? `تم الكشف الحقيقي: (${connectedCount}) أجهزة متصلة بالشبكة بنجاح، و (${disconnectedCount}) أجهزة غير مربوطة.`
+          : `تنبيه: عدم ربط أي جهاز! لم يتم العثور على أجهزة بصمة متصلة على الشبكة (${disconnectedCount} أجهزة غير مربوطة).`,
+    });
+  });
+
   // Mount Vite middleware in development, or serve dist in production
   if (process.env.NODE_ENV === 'production') {
     app.use(express.static(path.resolve(__dirname, 'dist')));

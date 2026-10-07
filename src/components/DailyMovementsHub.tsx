@@ -43,6 +43,7 @@ import {
   OrganizationSettings,
   WorkspaceTab,
 } from '../types';
+import { soundEffects } from '../utils/soundEffects';
 import {
   getAttendanceLogs,
   saveAttendanceLogsBatch,
@@ -1361,15 +1362,16 @@ export function DailyMovementsHub({
                 <span>موظفاً</span>
               </div>
 
-              {/* Page Size Switcher (25 / 50 / 100 / الكل) */}
+              {/* Page Size Switcher (10 / 20 / 50 / 100 / الكل) */}
               <div className="flex items-center gap-2">
-                <span className="text-slate-500 dark:text-slate-400 hidden md:inline">عدد الموظفين بالصفحة:</span>
+                <span className="text-slate-500 dark:text-slate-400 hidden md:inline text-[11px]">عدد السجلات بالصفحة:</span>
                 <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-900 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
-                  {[20, 30, 50, 100, 0].map((size) => (
+                  {[10, 20, 50, 100, 0].map((size) => (
                     <button
                       key={size}
                       type="button"
                       onClick={() => {
+                        soundEffects.playButtonClick();
                         setPageSize(size);
                         setCurrentPage(1);
                       }}
